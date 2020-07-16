@@ -1,3 +1,7 @@
+## Cherry-picked
+* Changed the certificates that veneur tests with to include SANs and no longer rely on Common Names, in order to comply with Go's [upcoming crackdown on CN certificate constraints](https://github.com/stripe/veneur/issues/791). Thanks, [antifuchs](https://github.com/antifuchs)!
+
+
 # 8.0.0, 2018-09-20
 
 ## Added
