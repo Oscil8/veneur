@@ -492,6 +492,22 @@ func NewFromConfig(logger *logrus.Logger, conf Config) (*Server, error) {
 		}
 	}
 
+	if conf.PrometheusRemoteWriteAddress != "" {
+		prometheusRemoteWriteSink, err := prometheus.NewRemoteWriteExporter(
+			conf.PrometheusRemoteWriteAddress,
+			conf.PrometheusRemoteWriteBearerToken,
+			conf.PrometheusRemoteWriteFlushMaxPerBody,
+			conf.PrometheusRemoteWriteFlushMaxConcurrency,
+			log,
+		)
+		if err != nil {
+			return ret, err
+		}
+
+		ret.metricSinks = append(ret.metricSinks, prometheusRemoteWriteSink)
+		logger.Info("Configured Prometheus Remote Write metric sink.")
+	}
+
 	{
 		mtx := sync.Mutex{}
 		if conf.DebugFlushedMetrics {
