@@ -749,6 +749,20 @@ func NewFromConfig(config ServerConfig) (*Server, error) {
 		logger.Info("Configured Prometheus metric sink.")
 	}
 
+	if conf.PrometheusRemoteWriteAddress != "" {
+		prometheusRemoteWriteSink, err := prometheus.NewRemoteWriteExporter(
+			conf.PrometheusRemoteWriteAddress,
+			conf.PrometheusRemoteWriteBearerToken,
+			log,
+		)
+		if err != nil {
+			return ret, err
+		}
+
+		ret.metricSinks = append(ret.metricSinks, prometheusRemoteWriteSink)
+		logger.Info("Configured Prometheus Remote Write metric sink.")
+	}
+
 	{
 		mtx := sync.Mutex{}
 		if conf.DebugFlushedMetrics {

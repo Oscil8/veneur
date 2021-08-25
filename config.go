@@ -87,6 +87,8 @@ type Config struct {
 	Percentiles                               []float64         `yaml:"percentiles"`
 	PrometheusNetworkType                     string            `yaml:"prometheus_network_type"`
 	PrometheusRepeaterAddress                 string            `yaml:"prometheus_repeater_address"`
+	PrometheusRemoteWriteAddress              string            `yaml:"prometheus_remote_write_address"`
+	PrometheusRemoteWriteBearerToken          string            `yaml:"prometheus_remote_bearer_token"`
 	ReadBufferSizeBytes                       int               `yaml:"read_buffer_size_bytes"`
 	SentryDsn                                 util.StringSecret `yaml:"sentry_dsn"`
 	SignalfxAPIKey                            util.StringSecret `yaml:"signalfx_api_key"`
