@@ -126,7 +126,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 
 		promMetrics = append(promMetrics, prompb.TimeSeries{
 			Labels:  promLabels,
-			Samples: []prompb.Sample{{Timestamp: m.Timestamp, Value: m.Value}},
+			Samples: []prompb.Sample{{Timestamp: m.Timestamp * 1000, Value: m.Value}},
 		})
 	}
 
