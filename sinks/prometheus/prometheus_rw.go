@@ -116,17 +116,17 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
 		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: m.Name})
 		for _, tag := range m.Tags {
-			fields := strings.SplitN(tag, ":", 2)
-			if len(fields) < 2 || len(fields[0]) == 0 {
-				prw.logger.WithField("tag", tag).Info("Malformed tag")
-				continue
+			if strings.Contains(tag, ":") {
+				keyvalpair := strings.SplitN(tag, ":", 2)
+				promLabels = append(promLabels, prompb.Label{Name: keyvalpair[0], Value: keyvalpair[1]})
+			} else {
+				promLabels = append(promLabels, prompb.Label{Name: tag, Value: "true"})
 			}
-			promLabels = append(promLabels, prompb.Label{Name: fields[0], Value: fields[1]})
 		}
 
 		promMetrics = append(promMetrics, prompb.TimeSeries{
 			Labels:  promLabels,
-			Samples: []prompb.Sample{{Timestamp: m.Timestamp * 1000, Value: m.Value}},
+			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Milliseconds(), Value: m.Value}},
 		})
 	}
 
