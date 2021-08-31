@@ -18,6 +18,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stripe/veneur/v14/samplers"
 	"github.com/stripe/veneur/v14/sinks"
+	"github.com/stripe/veneur/v14/sinks/prometheus/mapper"
 	"github.com/stripe/veneur/v14/sinks/prometheus/prompb"
 	"github.com/stripe/veneur/v14/ssf"
 	"github.com/stripe/veneur/v14/trace"
@@ -114,13 +115,13 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		}
 
 		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
-		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: m.Name})
+		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
 		for _, tag := range m.Tags {
 			if strings.Contains(tag, ":") {
 				keyvalpair := strings.SplitN(tag, ":", 2)
-				promLabels = append(promLabels, prompb.Label{Name: keyvalpair[0], Value: keyvalpair[1]})
+				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(keyvalpair[0]), Value: keyvalpair[1]})
 			} else {
-				promLabels = append(promLabels, prompb.Label{Name: tag, Value: "true"})
+				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(tag), Value: "true"})
 			}
 		}
 
