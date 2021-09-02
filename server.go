@@ -753,6 +753,8 @@ func NewFromConfig(config ServerConfig) (*Server, error) {
 		prometheusRemoteWriteSink, err := prometheus.NewRemoteWriteExporter(
 			conf.PrometheusRemoteWriteAddress,
 			conf.PrometheusRemoteWriteBearerToken,
+			conf.PrometheusRemoteWriteFlushMaxPerBody,
+			conf.PrometheusRemoteWriteFlushMaxConcurrency,
 			log,
 		)
 		if err != nil {

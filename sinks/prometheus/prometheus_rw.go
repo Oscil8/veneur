@@ -34,10 +34,12 @@ type RemoteWriteExporter struct {
 	logger      *logrus.Logger
 	traceClient *trace.Client
 	promClient  *http.Client
+	flushMaxPerBody,
+	flushMaxConcurrency int
 }
 
 // NewRemoteWriteExporter returns a new RemoteWriteExporter, validating params.
-func NewRemoteWriteExporter(addr string, bearerToken string, logger *logrus.Logger) (*RemoteWriteExporter, error) {
+func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int, flushMaxConcurrency int, logger *logrus.Logger) (*RemoteWriteExporter, error) {
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return nil, err
 	}
@@ -48,10 +50,20 @@ func NewRemoteWriteExporter(addr string, bearerToken string, logger *logrus.Logg
 		return nil, err
 	}
 
+	// some defaults
+	if flushMaxPerBody <= 0 {
+		flushMaxPerBody = 5000
+	}
+	if flushMaxConcurrency <= 0 {
+		flushMaxConcurrency = 50
+	}
+
 	return &RemoteWriteExporter{
-		addr:       addr,
-		logger:     logger,
-		promClient: httpClient,
+		addr:                addr,
+		logger:              logger,
+		promClient:          httpClient,
+		flushMaxPerBody:     flushMaxPerBody,
+		flushMaxConcurrency: flushMaxConcurrency,
 	}, nil
 }
 
@@ -76,12 +88,17 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 	// break the metrics into chunks of approximately equal size, such that
 	// each chunk is less than the limit
 	// we compute the chunks using rounding-up integer division
-	workers := ((len(prommetrics) - 1) / 5000) + 1
+	workers := ((len(prommetrics) - 1) / prw.flushMaxPerBody) + 1
 	chunkSize := ((len(prommetrics) - 1) / workers) + 1
 	prw.logger.WithField("workers", workers).Debug("Worker count chosen")
 	prw.logger.WithField("chunkSize", chunkSize).Debug("Chunk size chosen")
 	var wg sync.WaitGroup
 	flushStart := time.Now()
+
+	// a blocking channel to keep concurrency under control
+	semaphoreChan := make(chan struct{}, prw.flushMaxConcurrency)
+	defer close(semaphoreChan)
+
 	for i := 0; i < workers; i++ {
 		chunk := prommetrics[i*chunkSize:]
 		if i < workers-1 {
@@ -89,7 +106,21 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 			chunk = chunk[:chunkSize]
 		}
 		wg.Add(1)
-		go prw.flushPart(span.Attach(ctx), chunk, &wg)
+
+		if prw.flushMaxConcurrency > 0 {
+			// block until the semaphore channel has room
+			semaphoreChan <- struct{}{}
+		}
+
+		go func() {
+			defer func() {
+				if prw.flushMaxConcurrency > 0 {
+					// clear a spot in the semaphore channel
+					<-semaphoreChan
+				}
+			}()
+			prw.flushPart(span.Attach(ctx), chunk, &wg)
+		}()
 	}
 	wg.Wait()
 	tags := map[string]string{"sink": prw.Name()}
