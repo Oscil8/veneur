@@ -29,7 +29,7 @@ func TestNewRemoteWriteExporter(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, nil)
+			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, 5, 5, nil)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
