@@ -173,9 +173,29 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.
 		return // already logged failure
 	}
 
-	_, _, err = prw.store(ctx, req)
-	if err != nil {
-		prw.logger.Error(err.Error())
+	retries := 5
+	backoff := 50 * time.Millisecond
+	for {
+		_, _, err = prw.store(ctx, req)
+		if err != nil {
+			_, recoverable := err.(recoverableError)
+			if recoverable {
+				retries--
+				if retries < 0 {
+					prw.logger.Errorf("Failed: %v, aborting retries", err.Error())
+					return
+				}
+
+				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Milliseconds(), retries)
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+
+			// not recoverable
+			prw.logger.Errorf("Failed: %v, not retryable", err.Error())
+		}
+		return
 	}
 }
 
@@ -196,6 +216,11 @@ func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req [
 	return compressed, nil
 }
 
+// used to signify that the error from store is worth retry-ing
+type recoverableError struct {
+	error
+}
+
 // storeRequest sends a marshalled batch of samples to the HTTP endpoint
 // returns statuscode or -1 if the request didn't get to the server
 // response body is returned as []byte
@@ -213,8 +238,7 @@ func (prw *RemoteWriteExporter) store(ctx context.Context, req []byte) (int, []b
 
 	httpResp, err := prw.promClient.Do(httpReq.WithContext(ctx))
 	if err != nil {
-		// TODO: worth retry-ing
-		return -1, nil, err //recoverableError{err}
+		return -1, nil, recoverableError{err}
 	}
 	defer func() {
 		io.Copy(ioutil.Discard, httpResp.Body)
@@ -230,8 +254,8 @@ func (prw *RemoteWriteExporter) store(ctx context.Context, req []byte) (int, []b
 	if httpResp.StatusCode/100 != 2 {
 		err = errors.Errorf("server returned HTTP status %s: %s", httpResp.Status, string(responseBody))
 	}
-	/*if httpResp.StatusCode/100 == 5 {
+	if httpResp.StatusCode/100 == 5 {
 		return httpResp.StatusCode, responseBody, recoverableError{err}
-	}*/
+	}
 	return httpResp.StatusCode, responseBody, err
 }
