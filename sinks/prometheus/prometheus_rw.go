@@ -55,7 +55,7 @@ func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int
 		flushMaxPerBody = 5000
 	}
 	if flushMaxConcurrency <= 0 {
-		flushMaxConcurrency = 50
+		flushMaxConcurrency = 10
 	}
 
 	return &RemoteWriteExporter{

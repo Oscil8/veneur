@@ -612,7 +612,7 @@ prometheus_remote_flush_max_per_body: 5000
 
 # (optional) Maximum concurrency of parallel writes. Veneur will queue requests
 # above this limit when sending parallel requests.
-prometheus_remote_flush_max_concurrency: 50
+prometheus_remote_flush_max_concurrency: 10
 
 # == PLUGINS ==
 
