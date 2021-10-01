@@ -88,9 +88,9 @@ type Config struct {
 	PrometheusNetworkType                     string            `yaml:"prometheus_network_type"`
 	PrometheusRepeaterAddress                 string            `yaml:"prometheus_repeater_address"`
 	PrometheusRemoteWriteAddress              string            `yaml:"prometheus_remote_write_address"`
-	PrometheusRemoteWriteBearerToken          string            `yaml:"prometheus_remote_bearer_token"`
-	PrometheusRemoteWriteFlushMaxPerBody      int               `yaml:"prometheus_remote_flush_max_per_body"`
-	PrometheusRemoteWriteFlushMaxConcurrency  int               `yaml:"prometheus_remote_flush_max_concurrency"`
+	PrometheusRemoteWriteBearerToken          string            `yaml:"prometheus_remote_write_bearer_token"`
+	PrometheusRemoteWriteFlushMaxConcurrency  int               `yaml:"prometheus_remote_write_flush_max_concurrency"`
+	PrometheusRemoteWriteFlushMaxPerBody      int               `yaml:"prometheus_remote_write_flush_max_per_body"`
 	ReadBufferSizeBytes                       int               `yaml:"read_buffer_size_bytes"`
 	SentryDsn                                 util.StringSecret `yaml:"sentry_dsn"`
 	SignalfxAPIKey                            util.StringSecret `yaml:"signalfx_api_key"`
