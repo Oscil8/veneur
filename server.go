@@ -47,6 +47,7 @@ import (
 	"github.com/stripe/veneur/sinks/falconer"
 	"github.com/stripe/veneur/sinks/kafka"
 	"github.com/stripe/veneur/sinks/lightstep"
+	"github.com/stripe/veneur/sinks/prometheus"
 	"github.com/stripe/veneur/sinks/signalfx"
 	"github.com/stripe/veneur/sinks/splunk"
 	"github.com/stripe/veneur/sinks/ssfmetrics"
