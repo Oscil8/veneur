@@ -395,15 +395,15 @@ splunk_hec_ingest_timeout: "10ms"
 prometheus_remote_write_address: "https://destination.api/prometheus/remote/write"
 
 # (optional) A bearer token to supply as authentication to the above URL
-prometheus_remote_bearer_token: "auth-token"
+prometheus_remote_write_bearer_token: "auth-token"
 
 # (optional) How many metrics to include in the body of each Remote Write. Veneur
 # will post multiple times in parallel if the limit is exceeded.
-prometheus_remote_flush_max_per_body: 5000
+prometheus_remote_write_flush_max_per_body: 5000
 
 # (optional) Maximum concurrency of parallel writes. Veneur will queue requests
 # above this limit when sending parallel requests.
-prometheus_remote_flush_max_concurrency: 10
+prometheus_remote_write_flush_max_concurrency: 10
 
 # == PLUGINS ==
 
