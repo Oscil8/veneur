@@ -158,7 +158,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 
 		promMetrics = append(promMetrics, &prompb.TimeSeries{
 			Labels:  promLabels,
-			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Nanoseconds() / 1e3, Value: m.Value}},
+			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Nanoseconds() / 1e6, Value: m.Value}},
 		})
 	}
 
@@ -186,7 +186,7 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []*prompb
 					return
 				}
 
-				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Nanoseconds()/1e3, retries)
+				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Nanoseconds()/1e6, retries)
 				time.Sleep(backoff)
 				backoff *= 2
 				continue
