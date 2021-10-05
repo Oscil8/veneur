@@ -137,35 +137,35 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 func (prw *RemoteWriteExporter) FlushOtherSamples(ctx context.Context, samples []ssf.SSFSample) {
 }
 
-func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) []prompb.TimeSeries {
-	promMetrics := make([]prompb.TimeSeries, 0, len(metrics))
+func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) []*prompb.TimeSeries {
+	promMetrics := make([]*prompb.TimeSeries, 0, len(metrics))
 
 	for _, m := range metrics {
 		if !sinks.IsAcceptableMetric(m, prw) {
 			continue
 		}
 
-		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
-		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
+		promLabels := make([]*prompb.Label, 0, len(m.Tags)+1)
+		promLabels = append(promLabels, &prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
 		for _, tag := range m.Tags {
 			if strings.Contains(tag, ":") {
 				keyvalpair := strings.SplitN(tag, ":", 2)
-				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(keyvalpair[0]), Value: keyvalpair[1]})
+				promLabels = append(promLabels, &prompb.Label{Name: mapper.EscapeMetricName(keyvalpair[0]), Value: keyvalpair[1]})
 			} else {
-				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(tag), Value: "true"})
+				promLabels = append(promLabels, &prompb.Label{Name: mapper.EscapeMetricName(tag), Value: "true"})
 			}
 		}
 
-		promMetrics = append(promMetrics, prompb.TimeSeries{
+		promMetrics = append(promMetrics, &prompb.TimeSeries{
 			Labels:  promLabels,
-			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Milliseconds(), Value: m.Value}},
+			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Nanoseconds() / 1e3, Value: m.Value}},
 		})
 	}
 
 	return promMetrics
 }
 
-func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.TimeSeries, wg *sync.WaitGroup) {
+func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []*prompb.TimeSeries, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	req, err := prw.buildRequest(tsSlice)
@@ -186,7 +186,7 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.
 					return
 				}
 
-				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Milliseconds(), retries)
+				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Nanoseconds()/1e3, retries)
 				time.Sleep(backoff)
 				backoff *= 2
 				continue
@@ -199,7 +199,7 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.
 	}
 }
 
-func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req []byte, err error) {
+func (prw *RemoteWriteExporter) buildRequest(tsSlice []*prompb.TimeSeries) (req []byte, err error) {
 	request := prompb.WriteRequest{Timeseries: tsSlice}
 
 	var reqBuf []byte
