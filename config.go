@@ -57,9 +57,9 @@ type Config struct {
 	OmitEmptyHostname                        bool      `yaml:"omit_empty_hostname"`
 	Percentiles                              []float64 `yaml:"percentiles"`
 	PrometheusRemoteWriteAddress             string    `yaml:"prometheus_remote_write_address"`
-	PrometheusRemoteWriteBearerToken         string    `yaml:"prometheus_remote_write_bearer_token"`
-	PrometheusRemoteWriteFlushMaxConcurrency int       `yaml:"prometheus_remote_write_flush_max_concurrency"`
-	PrometheusRemoteWriteFlushMaxPerBody     int       `yaml:"prometheus_remote_write_flush_max_per_body"`
+	PrometheusRemoteWriteBearerToken         string    `yaml:"prometheus_remote_bearer_token"`
+	PrometheusRemoteWriteFlushMaxPerBody     int       `yaml:"prometheus_remote_flush_max_per_body"`
+	PrometheusRemoteWriteFlushMaxConcurrency int       `yaml:"prometheus_remote_flush_max_concurrency"`
 	ReadBufferSizeBytes                      int       `yaml:"read_buffer_size_bytes"`
 	SentryDsn                                string    `yaml:"sentry_dsn"`
 	SignalfxAPIKey                           string    `yaml:"signalfx_api_key"`
