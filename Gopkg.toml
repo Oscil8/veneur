@@ -19,6 +19,7 @@
 #  name = "github.com/x/y"
 #  version = "2.4.0"
 
+required = ["github.com/mwitkow/go-conntrack"]
 
 [[constraint]]
   name = "github.com/DataDog/datadog-go"
@@ -126,3 +127,7 @@
   go-tests = true
   unused-packages = true
   non-go = true
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/mwitkow/go-conntrack"

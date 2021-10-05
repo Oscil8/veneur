@@ -71,6 +71,14 @@
   revision = "8300947202c9fbce15a5a299b27c8b0f5092a520"
 
 [[projects]]
+  digest = "1:707ebe952a8b3d00b343c01536c79c73771d100f63ec6babeaed5c79e2b8a8dd"
+  name = "github.com/beorn7/perks"
+  packages = ["quantile"]
+  pruneopts = "NUT"
+  revision = "37c8de3658fcb183f997c4e13e8337516ab753e6"
+  version = "v1.0.1"
+
+[[projects]]
   digest = "1:f24bb5f05a37aed04e90c38448b04dee647b9327f90f848cf0834d2b100b327b"
   name = "github.com/certifi/gocertifi"
   packages = ["."]
@@ -274,6 +282,14 @@
   version = "0.2.2"
 
 [[projects]]
+  digest = "1:ebd0081aed1cd0af2f65a362c0ceea985eae9fe72efb28cefb84eca3b98dd3a3"
+  name = "github.com/jpillora/backoff"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "8eab2debe79d12b7bd3d10653910df25fa9552ba"
+  version = "1.0.0"
+
+[[projects]]
   digest = "1:63d8b364f0768ffda64b8e6e15c10535f3431e3c69d051dbb37f467ada02df98"
   name = "github.com/json-iterator/go"
   packages = ["."]
@@ -349,6 +365,14 @@
   revision = "b8bc1bf767474819792c23f32d8286a45736f1c6"
 
 [[projects]]
+  branch = "master"
+  digest = "1:7ff7a6c045fe2094e5fb48af08022e9b303530d5a07f064ca6401585e6767867"
+  name = "github.com/mwitkow/go-conntrack"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "2f068394615f73e460c2f3d2c158b0ad9321cadb"
+
+[[projects]]
   digest = "1:7da29c22bcc5c2ffb308324377dc00b5084650348c2799e573ed226d8cc9faf0"
   name = "github.com/opentracing/opentracing-go"
   packages = [
@@ -417,6 +441,17 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:623090ece42820e4121c5c85a4373b10b922e79f3b8c44caad67a45a50e10054"
+  name = "github.com/prometheus/client_golang"
+  packages = [
+    "prometheus",
+    "prometheus/internal",
+  ]
+  pruneopts = "NUT"
+  revision = "170205fb58decfd011f1550d4cfb737230d7ae4f"
+  version = "v1.1.0"
+
+[[projects]]
   branch = "master"
   digest = "1:32d10bdfa8f09ecf13598324dba86ab891f11db3c538b6a34d1c3b5b99d7c36b"
   name = "github.com/prometheus/client_model"
@@ -425,7 +460,6 @@
   revision = "6f3806018612930941127f2a7c6c453ba2c527d2"
 
 [[projects]]
-  branch = "master"
   digest = "1:963c72f95ba8f65fc8aa18164a69f8e423c192245603dc20834937b4a3f84198"
   name = "github.com/prometheus/common"
   packages = [
@@ -436,6 +470,18 @@
   ]
   pruneopts = "NUT"
   revision = "2afc453a9de43c46dadd462998d096e52cd4e4e3"
+
+[[projects]]
+  digest = "1:bc620e49ace8259c2888fc816a65b0c92287aeb8987234ff50a187d805a62c9f"
+  name = "github.com/prometheus/procfs"
+  packages = [
+    ".",
+    "internal/fs",
+    "internal/util",
+  ]
+  pruneopts = "NUT"
+  revision = "f436cbb89ece38bf080d446b3ca27053b305eaac"
+  version = "v0.7.3"
 
 [[projects]]
   branch = "master"
@@ -843,6 +889,7 @@
     "github.com/hashicorp/consul/api",
     "github.com/kelseyhightower/envconfig",
     "github.com/lightstep/lightstep-tracer-go",
+    "github.com/mwitkow/go-conntrack",
     "github.com/opentracing/opentracing-go",
     "github.com/opentracing/opentracing-go/ext",
     "github.com/opentracing/opentracing-go/log",
