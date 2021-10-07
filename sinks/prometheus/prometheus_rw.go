@@ -145,15 +145,28 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 			continue
 		}
 
+		seenKeys := make(map[string]struct{}, len(m.Tags)+1)
+		SEEN := struct{}{} // sentinel value for set
+
 		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
 		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
+		seenKeys["__name__"] = SEEN
+
 		for _, tag := range m.Tags {
+			var key, value string
 			if strings.Contains(tag, ":") {
 				keyvalpair := strings.SplitN(tag, ":", 2)
-				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(keyvalpair[0]), Value: keyvalpair[1]})
+				key, value = mapper.EscapeMetricName(keyvalpair[0]), keyvalpair[1]
 			} else {
-				promLabels = append(promLabels, prompb.Label{Name: mapper.EscapeMetricName(tag), Value: "true"})
+				key, value = mapper.EscapeMetricName(tag), "true"
 			}
+
+			if _, ok := seenKeys[key]; ok {
+				prw.logger.Warnf("Dropping label %s: %s for metric %s; duplicate key", key, value, m.Name)
+				continue
+			}
+			seenKeys[key] = SEEN
+			promLabels = append(promLabels, prompb.Label{Name: key, Value: value})
 		}
 
 		promMetrics = append(promMetrics, prompb.TimeSeries{

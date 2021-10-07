@@ -1,9 +1,19 @@
 package prometheus
 
 import (
+	"context"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gogo/protobuf/proto"
+	"github.com/golang/snappy"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stripe/veneur/samplers"
+	"github.com/stripe/veneur/sinks/prometheus/prompb"
+	"github.com/stripe/veneur/trace"
 )
 
 func TestNewRemoteWriteExporter(t *testing.T) {
@@ -40,53 +50,71 @@ func TestNewRemoteWriteExporter(t *testing.T) {
 }
 
 func TestRemoteWriteMetricFlush(t *testing.T) {
-	/* TODO:
-	// Create a TCP server emulating the statsd exporter, replaying the
-	// requests back for testing.
-	ln, err := net.Listen("tcp", ":0")
-	assert.NoError(t, err)
-	defer ln.Close()
+	// Create an HTTP server emulating the remote write endpoint and saving the request
+	resChan := make(chan prompb.WriteRequest)
+	remoteServer := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			compressed, err := ioutil.ReadAll(r.Body)
+			assert.NoError(t, err)
+			uncompressed, err := snappy.Decode(nil, compressed)
+			assert.NoError(t, err)
+			var res prompb.WriteRequest
+			err = proto.Unmarshal(uncompressed, &res)
+			assert.NoError(t, err)
+
+			w.WriteHeader(http.StatusOK)
+			resChan <- res
+		}))
+	defer remoteServer.Close()
 
 	// Limit batchSize for testing.
-	batchSize = 2
-	expectedMessages := []string{
-		"a.b.gauge:100|g|#foo:bar,baz:quz\na.b.counter:2|c|#foo:bar\n",
-		"a.b.status:5|g|#\n",
+	batchSize := 2
+	expectedRequests := []prompb.WriteRequest{
+		{
+			Timeseries: []*prompb.TimeSeries{
+				{
+					Labels: []*prompb.Label{
+						{Name: "__metric__", Value: "a.b.gauge"},
+						{Name: "foo", Value: "bar"},
+						{Name: "baz", Value: "quz"},
+					},
+					Samples: []prompb.Sample{
+						{Timestamp: 1000, Value: float64(100)}, // timestamp in ms
+					},
+				},
+				{
+					Labels: []*prompb.Label{
+						{Name: "__metric__", Value: "a.b.counter"},
+						{Name: "foo", Value: "bar"},
+					},
+					Samples: []prompb.Sample{
+						{Timestamp: 1000, Value: float64(2)}, // timestamp in ms
+					},
+				},
+			},
+		},
+		{
+			Timeseries: []*prompb.TimeSeries{
+				{
+					Labels: []*prompb.Label{
+						{Name: "__metric__", Value: "a.b.status"},
+					},
+					Samples: []prompb.Sample{
+						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
+					},
+				},
+			},
+		},
 	}
 
-	errChan := make(chan error)
-	resChan := make(chan string)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			errChan <- err
-			return
-		}
-		defer conn.Close()
-
-		for i := 0; i < len(expectedMessages); i++ {
-			// By forcing the receive buffer to be the size of the message,
-			// TCP would block and ensure that another message doesn't come
-			// in.
-			buf := make([]byte, len(expectedMessages[i]))
-			_, err = conn.Read(buf)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			resChan <- string(bytes.Trim(buf, "\x00"))
-		}
-	}()
-
 	logger := logrus.StandardLogger()
-	port := ln.Addr().(*net.TCPAddr).Port
-	sink, err := NewStatsdRepeater(fmt.Sprintf("localhost:%d", port), "tcp", logger)
+	sink, err := NewRemoteWriteExporter(remoteServer.URL, "token", batchSize, 1, logger)
 	assert.NoError(t, err)
 
 	assert.NoError(t, sink.Start(trace.DefaultClient))
 	assert.NoError(t, sink.Flush(context.Background(), []samplers.InterMetric{
 		samplers.InterMetric{
-			Name:      "a.b.gauge",
+			Name:      "a.b.gauge-foo",
 			Timestamp: 1,
 			Value:     float64(100),
 			Tags: []string{
@@ -112,14 +140,10 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 		},
 	}))
 
-	for _, want := range expectedMessages {
+	for _, want := range expectedRequests {
 		select {
 		case res := <-resChan:
 			assert.Equal(t, want, res)
-		case err := <-errChan:
-			// Give up here since it's likely if it failed, it may hang.
-			assert.NoError(t, err)
-			break
 		}
-	}*/
+	}
 }
