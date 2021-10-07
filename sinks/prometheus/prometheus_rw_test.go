@@ -103,6 +103,16 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
 					},
 				},
+				{
+					Labels: []*prompb.Label{
+						{Name: "__name__", Value: "a_b_gauge2"},
+						{Name: "foo", Value: "bar"},
+						{Name: "baz", Value: "zazz"},
+					},
+					Samples: []prompb.Sample{
+						{Timestamp: 1000, Value: float64(222)}, // timestamp in ms
+					},
+				},
 			},
 		},
 	}
@@ -137,6 +147,17 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			Timestamp: 1,
 			Value:     float64(5),
 			Type:      samplers.StatusMetric,
+		},
+		samplers.InterMetric{
+			Name:      "a.b.gauge2",
+			Timestamp: 1,
+			Value:     float64(222),
+			Tags: []string{
+				"foo:bar",
+				"foo:quz",
+				"baz:zazz",
+			},
+			Type: samplers.GaugeMetric,
 		},
 	}))
 
