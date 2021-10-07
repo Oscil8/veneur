@@ -51,7 +51,7 @@ func TestNewRemoteWriteExporter(t *testing.T) {
 
 func TestRemoteWriteMetricFlush(t *testing.T) {
 	// Create an HTTP server emulating the remote write endpoint and saving the request
-	resChan := make(chan prompb.WriteRequest)
+	resChan := make(chan prompb.WriteRequest, 5)
 	remoteServer := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			compressed, err := ioutil.ReadAll(r.Body)
@@ -74,7 +74,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			Timeseries: []prompb.TimeSeries{
 				{
 					Labels: []prompb.Label{
-						{Name: "__metric__", Value: "a.b.gauge"},
+						{Name: "__name__", Value: "a_b_gauge"},
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
 					},
@@ -84,7 +84,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 				},
 				{
 					Labels: []prompb.Label{
-						{Name: "__metric__", Value: "a.b.counter"},
+						{Name: "__name__", Value: "a_b_counter"},
 						{Name: "foo", Value: "bar"},
 					},
 					Samples: []prompb.Sample{
@@ -97,7 +97,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			Timeseries: []prompb.TimeSeries{
 				{
 					Labels: []prompb.Label{
-						{Name: "__metric__", Value: "a.b.status"},
+						{Name: "__name__", Value: "a_b_status"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
@@ -114,7 +114,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	assert.NoError(t, sink.Start(trace.DefaultClient))
 	assert.NoError(t, sink.Flush(context.Background(), []samplers.InterMetric{
 		samplers.InterMetric{
-			Name:      "a.b.gauge-foo",
+			Name:      "a.b.gauge",
 			Timestamp: 1,
 			Value:     float64(100),
 			Tags: []string{
