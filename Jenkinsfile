@@ -5,7 +5,7 @@ pipeline {
 
     parameters {
         string(name: "BRANCH_REV", defaultValue: "v8.0.0-prw-sink", description: "Revision to build")
-        string(name: "IMAGE_TAG", defaultValue: "v8.0.0-4", "Image tag")
+        string(name: "IMAGE_TAG", defaultValue: "v8.0.0-4", description: "Image tag")
         booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Perform a dry run (does not push images)')
     }
 
