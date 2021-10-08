@@ -27,8 +27,8 @@ pipeline {
             steps {
                 script {
                     dir('public-docker-images') {
-                        sh "docker build -f Dockerfile-debian-sid --build-arg BUILD_REF=${params.BRANCH_REV} -t ${env.IMAGE_NAME} ."
-                        sh "docker build -f Dockerfile-alpine --build-arg BUILD_REF=${params.BRANCH_REV} -t ${env.IMAGE_NAME_ALPINE} ."
+                        sh "docker build -f Dockerfile-debian-sid --build-arg BUILD_REF=${params.BRANCH_REV} -t ${env.IMAGE_NAME} --no-cache ."
+                        sh "docker build -f Dockerfile-alpine --build-arg BUILD_REF=${params.BRANCH_REV} -t ${env.IMAGE_NAME_ALPINE} --no-cache ."
                     }
                 }
             }
@@ -77,10 +77,10 @@ pipeline {
         }
         cleanup {
             echo 'Cleaning up...'
-            //script {
-            //    sh "docker rm ${env.IMAGE_NAME}"
-            //    sh "docker rm ${env.IMAGE_NAME_ALPINE}"
-            //}
+            script {
+               sh "docker image rm ${env.IMAGE_NAME}"
+               sh "docker image rm ${env.IMAGE_NAME_ALPINE}"
+            }
             cleanWs()
         }
     }
