@@ -77,10 +77,10 @@ pipeline {
         }
         cleanup {
             echo 'Cleaning up...'
-            script {
-                sh "docker rm ${env.IMAGE_NAME}"
-                sh "docker rm ${env.IMAGE_NAME_ALPINE}"
-            }
+            //script {
+            //    sh "docker rm ${env.IMAGE_NAME}"
+            //    sh "docker rm ${env.IMAGE_NAME_ALPINE}"
+            //}
             cleanWs()
         }
     }
