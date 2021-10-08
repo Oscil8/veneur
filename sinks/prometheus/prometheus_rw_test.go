@@ -39,7 +39,7 @@ func TestNewRemoteWriteExporter(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, 5, 5, nil)
+			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, 5, 5, []string{}, nil)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -68,7 +68,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	defer remoteServer.Close()
 
 	// Limit batchSize for testing.
-	batchSize := 2
+	batchSize := 3
 	expectedRequests := []prompb.WriteRequest{
 		{
 			Timeseries: []*prompb.TimeSeries{
@@ -77,6 +77,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "__name__", Value: "a_b_gauge"},
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
+						{Name: "default", Value: "abc"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(100)}, // timestamp in ms
@@ -86,9 +87,19 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					Labels: []*prompb.Label{
 						{Name: "__name__", Value: "a_b_counter"},
 						{Name: "foo", Value: "bar"},
+						{Name: "default", Value: "abc"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(2)}, // timestamp in ms
+					},
+				},
+				{
+					Labels: []*prompb.Label{
+						{Name: "__name__", Value: "a_b_status"},
+						{Name: "default", Value: "abc"},
+					},
+					Samples: []prompb.Sample{
+						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
 					},
 				},
 			},
@@ -97,20 +108,23 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			Timeseries: []*prompb.TimeSeries{
 				{
 					Labels: []*prompb.Label{
-						{Name: "__name__", Value: "a_b_status"},
+						{Name: "__name__", Value: "a_b_gauge2"},
+						{Name: "foo", Value: "bar"},
+						{Name: "baz", Value: "zazz"},
+						{Name: "default", Value: "abc"},
 					},
 					Samples: []prompb.Sample{
-						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
+						{Timestamp: 1000, Value: float64(222)}, // timestamp in ms
 					},
 				},
 				{
 					Labels: []*prompb.Label{
-						{Name: "__name__", Value: "a_b_gauge2"},
+						{Name: "__name__", Value: "a_b_counter2"},
 						{Name: "foo", Value: "bar"},
-						{Name: "baz", Value: "zazz"},
+						{Name: "default", Value: "override"},
 					},
 					Samples: []prompb.Sample{
-						{Timestamp: 1000, Value: float64(222)}, // timestamp in ms
+						{Timestamp: 1000, Value: float64(33)}, // timestamp in ms
 					},
 				},
 			},
@@ -118,7 +132,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	}
 
 	logger := logrus.StandardLogger()
-	sink, err := NewRemoteWriteExporter(remoteServer.URL, "token", batchSize, 1, logger)
+	sink, err := NewRemoteWriteExporter(remoteServer.URL, "token", batchSize, 1, []string{"default:abc"}, logger)
 	assert.NoError(t, err)
 
 	assert.NoError(t, sink.Start(trace.DefaultClient))
@@ -158,6 +172,16 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 				"baz:zazz",
 			},
 			Type: samplers.GaugeMetric,
+		},
+		samplers.InterMetric{
+			Name:      "a.b.counter2",
+			Timestamp: 1,
+			Value:     float64(33),
+			Tags: []string{
+				"foo:bar",
+				"default:override",
+			},
+			Type: samplers.CounterMetric,
 		},
 	}))
 
