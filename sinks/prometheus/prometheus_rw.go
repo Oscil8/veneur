@@ -31,6 +31,7 @@ import (
 type RemoteWriteExporter struct {
 	addr        string
 	headers     []string
+	tags        []string
 	logger      *logrus.Logger
 	traceClient *trace.Client
 	promClient  *http.Client
@@ -39,7 +40,7 @@ type RemoteWriteExporter struct {
 }
 
 // NewRemoteWriteExporter returns a new RemoteWriteExporter, validating params.
-func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int, flushMaxConcurrency int, logger *logrus.Logger) (*RemoteWriteExporter, error) {
+func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int, flushMaxConcurrency int, tags []string, logger *logrus.Logger) (*RemoteWriteExporter, error) {
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return nil, err
 	}
@@ -61,6 +62,7 @@ func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int
 	return &RemoteWriteExporter{
 		addr:                addr,
 		logger:              logger,
+		tags:                tags,
 		promClient:          httpClient,
 		flushMaxPerBody:     flushMaxPerBody,
 		flushMaxConcurrency: flushMaxConcurrency,
@@ -152,7 +154,10 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
 		seenKeys["__name__"] = SEEN
 
-		for _, tag := range m.Tags {
+		allTags := make([]string, 0, len(m.Tags)+len(prw.tags))
+		allTags = append(allTags, m.Tags...)
+		allTags = append(allTags, prw.tags...)
+		for _, tag := range allTags {
 			var key, value string
 			if strings.Contains(tag, ":") {
 				keyvalpair := strings.SplitN(tag, ":", 2)

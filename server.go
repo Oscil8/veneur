@@ -755,7 +755,7 @@ func NewFromConfig(config ServerConfig) (*Server, error) {
 			conf.PrometheusRemoteWriteBearerToken,
 			conf.PrometheusRemoteWriteFlushMaxPerBody,
 			conf.PrometheusRemoteWriteFlushMaxConcurrency,
-			log,
+			ret.Tags, log,
 		)
 		if err != nil {
 			return ret, err
