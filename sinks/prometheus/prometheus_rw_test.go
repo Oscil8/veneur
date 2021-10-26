@@ -11,9 +11,9 @@ import (
 	"github.com/golang/snappy"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
-	"github.com/stripe/veneur/samplers"
-	"github.com/stripe/veneur/sinks/prometheus/prompb"
-	"github.com/stripe/veneur/trace"
+	"github.com/stripe/veneur/v14/samplers"
+	"github.com/stripe/veneur/v14/sinks/prometheus/prompb"
+	"github.com/stripe/veneur/v14/trace"
 )
 
 func TestNewRemoteWriteExporter(t *testing.T) {
@@ -71,9 +71,9 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	batchSize := 2
 	expectedRequests := []prompb.WriteRequest{
 		{
-			Timeseries: []*prompb.TimeSeries{
+			Timeseries: []prompb.TimeSeries{
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__metric__", Value: "a.b.gauge"},
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
@@ -83,7 +83,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					},
 				},
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__metric__", Value: "a.b.counter"},
 						{Name: "foo", Value: "bar"},
 					},
@@ -94,9 +94,9 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			},
 		},
 		{
-			Timeseries: []*prompb.TimeSeries{
+			Timeseries: []prompb.TimeSeries{
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__metric__", Value: "a.b.status"},
 					},
 					Samples: []prompb.Sample{
