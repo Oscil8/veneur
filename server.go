@@ -497,7 +497,7 @@ func NewFromConfig(logger *logrus.Logger, conf Config) (*Server, error) {
 		prometheusRemoteWriteSink, err := prometheus.NewRemoteWriteExporter(
 			conf.PrometheusRemoteWriteAddress, conf.PrometheusRemoteBearerToken,
 			conf.PrometheusRemoteFlushMaxPerBody, conf.PrometheusRemoteFlushMaxConcurrency,
-			ret.Tags, log,
+			conf.Hostname, ret.Tags, log,
 		)
 		if err != nil {
 			return ret, err

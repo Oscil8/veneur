@@ -40,7 +40,7 @@ type RemoteWriteExporter struct {
 }
 
 // NewRemoteWriteExporter returns a new RemoteWriteExporter, validating params.
-func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int, flushMaxConcurrency int, tags []string, logger *logrus.Logger) (*RemoteWriteExporter, error) {
+func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int, flushMaxConcurrency int, hostname string, tags []string, logger *logrus.Logger) (*RemoteWriteExporter, error) {
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func NewRemoteWriteExporter(addr string, bearerToken string, flushMaxPerBody int
 	return &RemoteWriteExporter{
 		addr:                addr,
 		logger:              logger,
-		tags:                tags,
+		tags:                append(tags, "host:"+hostname),
 		promClient:          httpClient,
 		flushMaxPerBody:     flushMaxPerBody,
 		flushMaxConcurrency: flushMaxConcurrency,

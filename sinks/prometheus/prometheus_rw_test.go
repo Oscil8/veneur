@@ -39,7 +39,7 @@ func TestNewRemoteWriteExporter(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, 5, 5, []string{}, nil)
+			_, err := NewRemoteWriteExporter(tc.addr, tc.bearerToken, 5, 5, "localhost", []string{}, nil)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -78,6 +78,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
 						{Name: "default", Value: "abc"},
+						{Name: "host", "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(100)}, // timestamp in ms
@@ -88,6 +89,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "__name__", Value: "a_b_counter"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "abc"},
+						{Name: "host", "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(2)}, // timestamp in ms
@@ -97,6 +99,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					Labels: []*prompb.Label{
 						{Name: "__name__", Value: "a_b_status"},
 						{Name: "default", Value: "abc"},
+						{Name: "host", "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
@@ -112,6 +115,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "zazz"},
 						{Name: "default", Value: "abc"},
+						{Name: "host", "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(222)}, // timestamp in ms
@@ -122,6 +126,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "__name__", Value: "a_b_counter2"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "override"},
+						{Name: "host", "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(33)}, // timestamp in ms
@@ -132,7 +137,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	}
 
 	logger := logrus.StandardLogger()
-	sink, err := NewRemoteWriteExporter(remoteServer.URL, "token", batchSize, 1, []string{"default:abc"}, logger)
+	sink, err := NewRemoteWriteExporter(remoteServer.URL, "token", batchSize, 1, "localhost", []string{"default:abc"}, logger)
 	assert.NoError(t, err)
 
 	assert.NoError(t, sink.Start(trace.DefaultClient))
