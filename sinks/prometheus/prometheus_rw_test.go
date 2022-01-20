@@ -78,7 +78,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
 						{Name: "default", Value: "abc"},
-						{Name: "host", "localhost"},
+						{Name: "host", Value: "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(100)}, // timestamp in ms
@@ -89,7 +89,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "__name__", Value: "a_b_counter"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "abc"},
-						{Name: "host", "localhost"},
+						{Name: "host", Value: "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(2)}, // timestamp in ms
@@ -99,7 +99,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					Labels: []*prompb.Label{
 						{Name: "__name__", Value: "a_b_status"},
 						{Name: "default", Value: "abc"},
-						{Name: "host", "localhost"},
+						{Name: "host", Value: "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(5)}, // timestamp in ms
@@ -115,7 +115,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "zazz"},
 						{Name: "default", Value: "abc"},
-						{Name: "host", "localhost"},
+						{Name: "host", Value: "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(222)}, // timestamp in ms
@@ -126,7 +126,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 						{Name: "__name__", Value: "a_b_counter2"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "override"},
-						{Name: "host", "localhost"},
+						{Name: "host", Value: "localhost"},
 					},
 					Samples: []prompb.Sample{
 						{Timestamp: 1000, Value: float64(33)}, // timestamp in ms
