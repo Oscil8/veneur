@@ -28,6 +28,8 @@ message MetricMetadata {
     SUMMARY        = 5;
     INFO           = 6;
     STATESET       = 7;
+
+    DELTA_COUNTER  = 128; // Proprietary extension; statsd style counter
   }
 
   // Represents the metric type, these match the set from Prometheus.
