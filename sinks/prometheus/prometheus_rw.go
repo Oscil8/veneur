@@ -85,7 +85,7 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 	span, _ := trace.StartSpanFromContext(ctx, "")
 	defer span.ClientFinish(prw.traceClient)
 
-	prommetrics := prw.finalizeMetrics(interMetrics)
+	prommetrics, promMetadata := prw.finalizeMetrics(interMetrics)
 
 	// break the metrics into chunks of approximately equal size, such that
 	// each chunk is less than the limit
@@ -100,6 +100,24 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 	// a blocking channel to keep concurrency under control
 	semaphoreChan := make(chan struct{}, prw.flushMaxConcurrency)
 	defer close(semaphoreChan)
+
+	// first flush metadata (TODO: not every time ..)
+	// if metadata enabled..
+	wg.Add(1)
+	if prw.flushMaxConcurrency > 0 {
+		// block until the semaphore channel has room
+		semaphoreChan <- struct{}{}
+	}
+
+	go func() {
+		defer func() {
+			if prw.flushMaxConcurrency > 0 {
+				// clear a spot in the semaphore channel
+				<-semaphoreChan
+			}
+		}()
+		prw.flushMetadata(span.Attach(ctx), promMetadata, &wg)
+	}()
 
 	for i := 0; i < workers; i++ {
 		chunk := prommetrics[i*chunkSize:]
@@ -139,19 +157,29 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 func (prw *RemoteWriteExporter) FlushOtherSamples(ctx context.Context, samples []ssf.SSFSample) {
 }
 
-func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) []prompb.TimeSeries {
+func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) ([]prompb.TimeSeries, []prompb.MetricMetadata) {
 	promMetrics := make([]prompb.TimeSeries, 0, len(metrics))
+	metadataStore := make(map[string]samplers.MetricType, 100)
 
 	for _, m := range metrics {
 		if !sinks.IsAcceptableMetric(m, prw) {
 			continue
 		}
 
+		mappedName := mapper.EscapeMetricName(m.Name)
+		mtype, ok := metadataStore[mappedName]
+		if !ok || mtype != m.Type {
+			metadataStore[mappedName] = m.Type
+		}
+		if ok && mtype != m.Type {
+			// log
+		}
+
 		seenKeys := make(map[string]struct{}, len(m.Tags)+1)
 		SEEN := struct{}{} // sentinel value for set
 
 		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
-		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
+		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mappedName})
 		seenKeys["__name__"] = SEEN
 
 		allTags := make([]string, 0, len(m.Tags)+len(prw.tags))
@@ -180,7 +208,20 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		})
 	}
 
-	return promMetrics
+	promMetadata := make([]prompb.MetricMetadata, 0, len(metadataStore))
+	for metricName, metricType := range metadataStore {
+		pm := prompb.MetricMetadata{MetricFamilyName: metricName}
+		switch metricType {
+		case samplers.CounterMetric:
+			pm.Type = prompb.MetricMetadata_COUNTER
+		case samplers.GaugeMetric:
+			pm.Type = prompb.MetricMetadata_GAUGE
+		default:
+			continue // skip unknown types
+		}
+		promMetadata = append(promMetadata, pm)
+	}
+	return promMetrics, promMetadata
 }
 
 func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.TimeSeries, wg *sync.WaitGroup) {
@@ -229,6 +270,57 @@ func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req [
 	compressed := snappy.Encode(nil, reqBuf)
 	if err != nil {
 		prw.logger.Errorf("failed to compress the WriteRequest %v", err)
+		return nil, err
+	}
+	return compressed, nil
+}
+
+func (prw *RemoteWriteExporter) flushMetadata(ctx context.Context, mdSlice []prompb.MetricMetadata, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	req, err := prw.buildMetadataRequest(mdSlice)
+	if err != nil {
+		return // already logged failure
+	}
+
+	retries := 5
+	backoff := 50 * time.Millisecond
+	for {
+		_, _, err = prw.store(ctx, req)
+		if err != nil {
+			_, recoverable := err.(recoverableError)
+			if recoverable {
+				retries--
+				if retries < 0 {
+					prw.logger.Errorf("Failed: %v, aborting retries", err.Error())
+					return
+				}
+
+				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Nanoseconds()/1e6, retries)
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+
+			// not recoverable
+			prw.logger.Errorf("Failed: %v, not retryable", err.Error())
+		}
+		return
+	}
+}
+
+func (prw *RemoteWriteExporter) buildMetadataRequest(mdSlice []prompb.MetricMetadata) (req []byte, err error) {
+	request := prompb.WriteRequest{Metadata: mdSlice}
+
+	var reqBuf []byte
+	if reqBuf, err = proto.Marshal(&request); err != nil {
+		prw.logger.Errorf("failed to marshal the md WriteRequest %v", err)
+		return nil, err
+	}
+
+	compressed := snappy.Encode(nil, reqBuf)
+	if err != nil {
+		prw.logger.Errorf("failed to compress the md WriteRequest %v", err)
 		return nil, err
 	}
 	return compressed, nil

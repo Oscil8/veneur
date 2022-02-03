@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
@@ -70,6 +71,14 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	// Limit batchSize for testing.
 	batchSize := 3
 	expectedRequests := []prompb.WriteRequest{
+		{
+			Metadata: []prompb.MetricMetadata{
+				{Type: prompb.MetricMetadata_COUNTER, MetricFamilyName: "a_b_counter"},
+				{Type: prompb.MetricMetadata_COUNTER, MetricFamilyName: "a_b_counter2"},
+				{Type: prompb.MetricMetadata_GAUGE, MetricFamilyName: "a_b_gauge"},
+				{Type: prompb.MetricMetadata_GAUGE, MetricFamilyName: "a_b_gauge2"},
+			},
+		},
 		{
 			Timeseries: []prompb.TimeSeries{
 				{
@@ -193,6 +202,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	for _, want := range expectedRequests {
 		select {
 		case res := <-resChan:
+			sort.Slice(res.Metadata, func(i, j int) bool { return res.Metadata[i].MetricFamilyName < res.Metadata[j].MetricFamilyName })
 			assert.Equal(t, want, res)
 		}
 	}
