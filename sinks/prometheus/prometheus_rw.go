@@ -213,7 +213,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		pm := prompb.MetricMetadata{MetricFamilyName: metricName}
 		switch metricType {
 		case samplers.CounterMetric:
-			pm.Type = prompb.MetricMetadata_COUNTER
+			pm.Type = prompb.MetricMetadata_DELTA_COUNTER
 		case samplers.GaugeMetric:
 			pm.Type = prompb.MetricMetadata_GAUGE
 		default:

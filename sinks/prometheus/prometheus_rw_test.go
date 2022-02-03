@@ -73,8 +73,8 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	expectedRequests := []prompb.WriteRequest{
 		{
 			Metadata: []prompb.MetricMetadata{
-				{Type: prompb.MetricMetadata_COUNTER, MetricFamilyName: "a_b_counter"},
-				{Type: prompb.MetricMetadata_COUNTER, MetricFamilyName: "a_b_counter2"},
+				{Type: prompb.MetricMetadata_DELTA_COUNTER, MetricFamilyName: "a_b_counter"},
+				{Type: prompb.MetricMetadata_DELTA_COUNTER, MetricFamilyName: "a_b_counter2"},
 				{Type: prompb.MetricMetadata_GAUGE, MetricFamilyName: "a_b_gauge"},
 				{Type: prompb.MetricMetadata_GAUGE, MetricFamilyName: "a_b_gauge2"},
 			},
