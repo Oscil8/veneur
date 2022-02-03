@@ -14,12 +14,16 @@
 		ReadResponse
 		Query
 		QueryResult
+		ChunkedReadResponse
+		MetricMetadata
 		Sample
 		TimeSeries
 		Label
 		Labels
 		LabelMatcher
 		ReadHints
+		Chunk
+		ChunkedSeries
 */
 package prompb
 
@@ -40,8 +44,44 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.GoGoProtoPackageIsVersion2 // please upgrade the proto package
 
+type ReadRequest_ResponseType int32
+
+const (
+	// Server will return a single ReadResponse message with matched series that includes list of raw samples.
+	// It's recommended to use streamed response types instead.
+	//
+	// Response headers:
+	// Content-Type: "application/x-protobuf"
+	// Content-Encoding: "snappy"
+	ReadRequest_SAMPLES ReadRequest_ResponseType = 0
+	// Server will stream a delimited ChunkedReadResponse message that contains XOR encoded chunks for a single series.
+	// Each message is following varint size and fixed size bigendian uint32 for CRC32 Castagnoli checksum.
+	//
+	// Response headers:
+	// Content-Type: "application/x-streamed-protobuf; proto=prometheus.ChunkedReadResponse"
+	// Content-Encoding: ""
+	ReadRequest_STREAMED_XOR_CHUNKS ReadRequest_ResponseType = 1
+)
+
+var ReadRequest_ResponseType_name = map[int32]string{
+	0: "SAMPLES",
+	1: "STREAMED_XOR_CHUNKS",
+}
+var ReadRequest_ResponseType_value = map[string]int32{
+	"SAMPLES":             0,
+	"STREAMED_XOR_CHUNKS": 1,
+}
+
+func (x ReadRequest_ResponseType) String() string {
+	return proto.EnumName(ReadRequest_ResponseType_name, int32(x))
+}
+func (ReadRequest_ResponseType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptorRemote, []int{1, 0}
+}
+
 type WriteRequest struct {
-	Timeseries []*TimeSeries `protobuf:"bytes,1,rep,name=timeseries" json:"timeseries,omitempty"`
+	Timeseries []TimeSeries     `protobuf:"bytes,1,rep,name=timeseries" json:"timeseries"`
+	Metadata   []MetricMetadata `protobuf:"bytes,3,rep,name=metadata" json:"metadata"`
 }
 
 func (m *WriteRequest) Reset()                    { *m = WriteRequest{} }
@@ -49,15 +89,29 @@ func (m *WriteRequest) String() string            { return proto.CompactTextStri
 func (*WriteRequest) ProtoMessage()               {}
 func (*WriteRequest) Descriptor() ([]byte, []int) { return fileDescriptorRemote, []int{0} }
 
-func (m *WriteRequest) GetTimeseries() []*TimeSeries {
+func (m *WriteRequest) GetTimeseries() []TimeSeries {
 	if m != nil {
 		return m.Timeseries
 	}
 	return nil
 }
 
+func (m *WriteRequest) GetMetadata() []MetricMetadata {
+	if m != nil {
+		return m.Metadata
+	}
+	return nil
+}
+
+// ReadRequest represents a remote read request.
 type ReadRequest struct {
 	Queries []*Query `protobuf:"bytes,1,rep,name=queries" json:"queries,omitempty"`
+	// accepted_response_types allows negotiating the content type of the response.
+	//
+	// Response types are taken from the list in the FIFO order. If no response type in `accepted_response_types` is
+	// implemented by server, error is returned.
+	// For request that do not contain `accepted_response_types` field the SAMPLES response type will be used.
+	AcceptedResponseTypes []ReadRequest_ResponseType `protobuf:"varint,2,rep,packed,name=accepted_response_types,json=acceptedResponseTypes,enum=prometheus.ReadRequest_ResponseType" json:"accepted_response_types,omitempty"`
 }
 
 func (m *ReadRequest) Reset()                    { *m = ReadRequest{} }
@@ -72,6 +126,14 @@ func (m *ReadRequest) GetQueries() []*Query {
 	return nil
 }
 
+func (m *ReadRequest) GetAcceptedResponseTypes() []ReadRequest_ResponseType {
+	if m != nil {
+		return m.AcceptedResponseTypes
+	}
+	return nil
+}
+
+// ReadResponse is a response when response_type equals SAMPLES.
 type ReadResponse struct {
 	// In same order as the request's queries.
 	Results []*QueryResult `protobuf:"bytes,1,rep,name=results" json:"results,omitempty"`
@@ -146,12 +208,43 @@ func (m *QueryResult) GetTimeseries() []*TimeSeries {
 	return nil
 }
 
+// ChunkedReadResponse is a response when response_type equals STREAMED_XOR_CHUNKS.
+// We strictly stream full series after series, optionally split by time. This means that a single frame can contain
+// partition of the single series, but once a new series is started to be streamed it means that no more chunks will
+// be sent for previous one. Series are returned sorted in the same way TSDB block are internally.
+type ChunkedReadResponse struct {
+	ChunkedSeries []*ChunkedSeries `protobuf:"bytes,1,rep,name=chunked_series,json=chunkedSeries" json:"chunked_series,omitempty"`
+	// query_index represents an index of the query from ReadRequest.queries these chunks relates to.
+	QueryIndex int64 `protobuf:"varint,2,opt,name=query_index,json=queryIndex,proto3" json:"query_index,omitempty"`
+}
+
+func (m *ChunkedReadResponse) Reset()                    { *m = ChunkedReadResponse{} }
+func (m *ChunkedReadResponse) String() string            { return proto.CompactTextString(m) }
+func (*ChunkedReadResponse) ProtoMessage()               {}
+func (*ChunkedReadResponse) Descriptor() ([]byte, []int) { return fileDescriptorRemote, []int{5} }
+
+func (m *ChunkedReadResponse) GetChunkedSeries() []*ChunkedSeries {
+	if m != nil {
+		return m.ChunkedSeries
+	}
+	return nil
+}
+
+func (m *ChunkedReadResponse) GetQueryIndex() int64 {
+	if m != nil {
+		return m.QueryIndex
+	}
+	return 0
+}
+
 func init() {
 	proto.RegisterType((*WriteRequest)(nil), "prometheus.WriteRequest")
 	proto.RegisterType((*ReadRequest)(nil), "prometheus.ReadRequest")
 	proto.RegisterType((*ReadResponse)(nil), "prometheus.ReadResponse")
 	proto.RegisterType((*Query)(nil), "prometheus.Query")
 	proto.RegisterType((*QueryResult)(nil), "prometheus.QueryResult")
+	proto.RegisterType((*ChunkedReadResponse)(nil), "prometheus.ChunkedReadResponse")
+	proto.RegisterEnum("prometheus.ReadRequest_ResponseType", ReadRequest_ResponseType_name, ReadRequest_ResponseType_value)
 }
 func (m *WriteRequest) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
@@ -171,6 +264,18 @@ func (m *WriteRequest) MarshalTo(dAtA []byte) (int, error) {
 	if len(m.Timeseries) > 0 {
 		for _, msg := range m.Timeseries {
 			dAtA[i] = 0xa
+			i++
+			i = encodeVarintRemote(dAtA, i, uint64(msg.Size()))
+			n, err := msg.MarshalTo(dAtA[i:])
+			if err != nil {
+				return 0, err
+			}
+			i += n
+		}
+	}
+	if len(m.Metadata) > 0 {
+		for _, msg := range m.Metadata {
+			dAtA[i] = 0x1a
 			i++
 			i = encodeVarintRemote(dAtA, i, uint64(msg.Size()))
 			n, err := msg.MarshalTo(dAtA[i:])
@@ -209,6 +314,23 @@ func (m *ReadRequest) MarshalTo(dAtA []byte) (int, error) {
 			}
 			i += n
 		}
+	}
+	if len(m.AcceptedResponseTypes) > 0 {
+		dAtA2 := make([]byte, len(m.AcceptedResponseTypes)*10)
+		var j1 int
+		for _, num := range m.AcceptedResponseTypes {
+			for num >= 1<<7 {
+				dAtA2[j1] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j1++
+			}
+			dAtA2[j1] = uint8(num)
+			j1++
+		}
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintRemote(dAtA, i, uint64(j1))
+		i += copy(dAtA[i:], dAtA2[:j1])
 	}
 	return i, nil
 }
@@ -284,11 +406,11 @@ func (m *Query) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0x22
 		i++
 		i = encodeVarintRemote(dAtA, i, uint64(m.Hints.Size()))
-		n1, err := m.Hints.MarshalTo(dAtA[i:])
+		n3, err := m.Hints.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n1
+		i += n3
 	}
 	return i, nil
 }
@@ -323,6 +445,41 @@ func (m *QueryResult) MarshalTo(dAtA []byte) (int, error) {
 	return i, nil
 }
 
+func (m *ChunkedReadResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ChunkedReadResponse) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if len(m.ChunkedSeries) > 0 {
+		for _, msg := range m.ChunkedSeries {
+			dAtA[i] = 0xa
+			i++
+			i = encodeVarintRemote(dAtA, i, uint64(msg.Size()))
+			n, err := msg.MarshalTo(dAtA[i:])
+			if err != nil {
+				return 0, err
+			}
+			i += n
+		}
+	}
+	if m.QueryIndex != 0 {
+		dAtA[i] = 0x10
+		i++
+		i = encodeVarintRemote(dAtA, i, uint64(m.QueryIndex))
+	}
+	return i, nil
+}
+
 func encodeVarintRemote(dAtA []byte, offset int, v uint64) int {
 	for v >= 1<<7 {
 		dAtA[offset] = uint8(v&0x7f | 0x80)
@@ -341,6 +498,12 @@ func (m *WriteRequest) Size() (n int) {
 			n += 1 + l + sovRemote(uint64(l))
 		}
 	}
+	if len(m.Metadata) > 0 {
+		for _, e := range m.Metadata {
+			l = e.Size()
+			n += 1 + l + sovRemote(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -352,6 +515,13 @@ func (m *ReadRequest) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovRemote(uint64(l))
 		}
+	}
+	if len(m.AcceptedResponseTypes) > 0 {
+		l = 0
+		for _, e := range m.AcceptedResponseTypes {
+			l += sovRemote(uint64(e))
+		}
+		n += 1 + sovRemote(uint64(l)) + l
 	}
 	return n
 }
@@ -398,6 +568,21 @@ func (m *QueryResult) Size() (n int) {
 			l = e.Size()
 			n += 1 + l + sovRemote(uint64(l))
 		}
+	}
+	return n
+}
+
+func (m *ChunkedReadResponse) Size() (n int) {
+	var l int
+	_ = l
+	if len(m.ChunkedSeries) > 0 {
+		for _, e := range m.ChunkedSeries {
+			l = e.Size()
+			n += 1 + l + sovRemote(uint64(l))
+		}
+	}
+	if m.QueryIndex != 0 {
+		n += 1 + sovRemote(uint64(m.QueryIndex))
 	}
 	return n
 }
@@ -470,8 +655,39 @@ func (m *WriteRequest) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Timeseries = append(m.Timeseries, &TimeSeries{})
+			m.Timeseries = append(m.Timeseries, TimeSeries{})
 			if err := m.Timeseries[len(m.Timeseries)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Metadata", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRemote
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRemote
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Metadata = append(m.Metadata, MetricMetadata{})
+			if err := m.Metadata[len(m.Metadata)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -556,6 +772,68 @@ func (m *ReadRequest) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 2:
+			if wireType == 0 {
+				var v ReadRequest_ResponseType
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRemote
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= (ReadRequest_ResponseType(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.AcceptedResponseTypes = append(m.AcceptedResponseTypes, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRemote
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= (int(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthRemote
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				for iNdEx < postIndex {
+					var v ReadRequest_ResponseType
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRemote
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= (ReadRequest_ResponseType(b) & 0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.AcceptedResponseTypes = append(m.AcceptedResponseTypes, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceptedResponseTypes", wireType)
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRemote(dAtA[iNdEx:])
@@ -891,6 +1169,106 @@ func (m *QueryResult) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *ChunkedReadResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRemote
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ChunkedReadResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ChunkedReadResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ChunkedSeries", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRemote
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRemote
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ChunkedSeries = append(m.ChunkedSeries, &ChunkedSeries{})
+			if err := m.ChunkedSeries[len(m.ChunkedSeries)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field QueryIndex", wireType)
+			}
+			m.QueryIndex = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRemote
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.QueryIndex |= (int64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRemote(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRemote
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func skipRemote(dAtA []byte) (n int, err error) {
 	l := len(dAtA)
 	iNdEx := 0
@@ -999,25 +1377,36 @@ var (
 func init() { proto.RegisterFile("remote.proto", fileDescriptorRemote) }
 
 var fileDescriptorRemote = []byte{
-	// 308 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x9c, 0x91, 0x4f, 0x4b, 0xf3, 0x40,
-	0x10, 0xc6, 0xd9, 0xb7, 0x6f, 0x5b, 0x99, 0x14, 0xa9, 0x8b, 0x7f, 0x82, 0x87, 0x52, 0x72, 0x0a,
-	0x54, 0x0a, 0x56, 0xf1, 0xe0, 0x4d, 0x41, 0xf1, 0x60, 0x0f, 0xae, 0x05, 0xc1, 0x4b, 0x49, 0xed,
-	0x40, 0x03, 0xdd, 0x64, 0xbb, 0x33, 0x39, 0xf4, 0xeb, 0x79, 0xf2, 0xe8, 0x47, 0x90, 0x7c, 0x12,
-	0xc9, 0x86, 0xe8, 0x8a, 0x37, 0xcf, 0xbf, 0xdf, 0xf3, 0xf0, 0x0c, 0x03, 0x3d, 0x8b, 0x3a, 0x67,
-	0x1c, 0x1b, 0x9b, 0x73, 0x2e, 0xc1, 0xd8, 0x5c, 0x23, 0xaf, 0xb0, 0xa0, 0xe3, 0x80, 0xb7, 0x06,
-	0xa9, 0x06, 0xd1, 0x2d, 0xf4, 0x9e, 0x6c, 0xca, 0xa8, 0x70, 0x53, 0x20, 0xb1, 0xbc, 0x00, 0xe0,
-	0x54, 0x23, 0xa1, 0x4d, 0x91, 0x42, 0x31, 0x6c, 0xc5, 0xc1, 0xe4, 0x70, 0xfc, 0x9d, 0x1e, 0xcf,
-	0x52, 0x8d, 0x8f, 0x8e, 0x2a, 0xcf, 0x8c, 0x2e, 0x21, 0x50, 0x98, 0x2c, 0x9b, 0x9a, 0x11, 0x74,
-	0x37, 0x85, 0xdf, 0xb1, 0xe7, 0x77, 0x3c, 0x14, 0x68, 0xb7, 0xaa, 0x31, 0xa2, 0x2b, 0xe8, 0xd5,
-	0x59, 0x32, 0x79, 0x46, 0x28, 0x4f, 0xa1, 0x6b, 0x91, 0x8a, 0x35, 0x37, 0xe1, 0xa3, 0xdf, 0x61,
-	0xc7, 0x55, 0xe3, 0x45, 0xaf, 0x02, 0xda, 0x0e, 0xc8, 0x13, 0x90, 0xc4, 0x89, 0xe5, 0xb9, 0x1b,
-	0xc7, 0x89, 0x36, 0x73, 0x5d, 0xf5, 0x88, 0xb8, 0xa5, 0xfa, 0x8e, 0xcc, 0x1a, 0x30, 0x25, 0x19,
-	0x43, 0x1f, 0xb3, 0xe5, 0x4f, 0xf7, 0x9f, 0x73, 0x77, 0x31, 0x5b, 0xfa, 0xe6, 0x39, 0xec, 0xe8,
-	0x84, 0x5f, 0x56, 0x68, 0x29, 0x6c, 0xb9, 0x55, 0xa1, 0xbf, 0xea, 0x3e, 0x59, 0xe0, 0x7a, 0x5a,
-	0x0b, 0xea, 0xcb, 0x94, 0x23, 0x68, 0xaf, 0xd2, 0x8c, 0x29, 0xfc, 0x3f, 0x14, 0x71, 0x30, 0x39,
-	0xf0, 0x23, 0xd5, 0xcd, 0x77, 0x15, 0x54, 0xb5, 0x13, 0xdd, 0x40, 0xe0, 0x1d, 0xf7, 0xd7, 0x57,
-	0x5c, 0xef, 0xbf, 0x95, 0x03, 0xf1, 0x5e, 0x0e, 0xc4, 0x47, 0x39, 0x10, 0xcf, 0x9d, 0x2a, 0x60,
-	0x16, 0x8b, 0x8e, 0xfb, 0xf7, 0xd9, 0x67, 0x00, 0x00, 0x00, 0xff, 0xff, 0x81, 0x1e, 0xc0, 0x24,
-	0x18, 0x02, 0x00, 0x00,
+	// 496 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x8c, 0x53, 0xcd, 0x6e, 0xd3, 0x40,
+	0x10, 0xee, 0x26, 0x69, 0x13, 0x8d, 0x43, 0x14, 0xb6, 0x2d, 0x09, 0x39, 0xa4, 0x91, 0xc5, 0x21,
+	0x52, 0x51, 0x10, 0xa1, 0xe2, 0xd4, 0x03, 0x69, 0x89, 0x54, 0xa0, 0xe6, 0x67, 0x13, 0x04, 0x42,
+	0x48, 0xd6, 0xc6, 0x1e, 0x35, 0x16, 0xf5, 0x4f, 0x77, 0xd7, 0x52, 0xf3, 0x16, 0x3c, 0x13, 0xa7,
+	0x9e, 0x10, 0x4f, 0x80, 0x50, 0x9e, 0x04, 0x79, 0x6d, 0x87, 0x2d, 0x5c, 0xb8, 0xad, 0xbf, 0x3f,
+	0xcf, 0xcc, 0xce, 0x42, 0x53, 0x60, 0x18, 0x2b, 0x1c, 0x25, 0x22, 0x56, 0x31, 0x85, 0x44, 0xc4,
+	0x21, 0xaa, 0x25, 0xa6, 0xb2, 0x67, 0xa9, 0x55, 0x82, 0x32, 0x27, 0x7a, 0x7b, 0x17, 0xf1, 0x45,
+	0xac, 0x8f, 0x8f, 0xb2, 0x53, 0x8e, 0xda, 0x5f, 0x09, 0x34, 0x3f, 0x88, 0x40, 0x21, 0xc3, 0xab,
+	0x14, 0xa5, 0xa2, 0xc7, 0x00, 0x2a, 0x08, 0x51, 0xa2, 0x08, 0x50, 0x76, 0xc9, 0xa0, 0x3a, 0xb4,
+	0xc6, 0xf7, 0x46, 0x7f, 0x42, 0x47, 0xf3, 0x20, 0xc4, 0x99, 0x66, 0x4f, 0x6a, 0x37, 0x3f, 0x0f,
+	0xb6, 0x98, 0xa1, 0xa7, 0xc7, 0xd0, 0x08, 0x51, 0x71, 0x9f, 0x2b, 0xde, 0xad, 0x6a, 0x6f, 0xcf,
+	0xf4, 0x3a, 0xa8, 0x44, 0xe0, 0x39, 0x85, 0xa2, 0xf0, 0x6f, 0x1c, 0x2f, 0x6b, 0x8d, 0x4a, 0xbb,
+	0x6a, 0x7f, 0x27, 0x60, 0x31, 0xe4, 0x7e, 0x59, 0xd1, 0x21, 0xd4, 0xaf, 0x52, 0xb3, 0x9c, 0xbb,
+	0x66, 0xe4, 0xbb, 0x14, 0xc5, 0x8a, 0x95, 0x0a, 0xfa, 0x19, 0x3a, 0xdc, 0xf3, 0x30, 0x51, 0xe8,
+	0xbb, 0x02, 0x65, 0x12, 0x47, 0x12, 0x5d, 0x3d, 0x86, 0x6e, 0x65, 0x50, 0x1d, 0xb6, 0xc6, 0x0f,
+	0x4c, 0xb3, 0xf1, 0x9b, 0x11, 0x2b, 0xd4, 0xf3, 0x55, 0x82, 0x6c, 0xbf, 0x0c, 0x31, 0x51, 0x69,
+	0x1f, 0x41, 0xd3, 0x04, 0xa8, 0x05, 0xf5, 0xd9, 0xc4, 0x79, 0x7b, 0x3e, 0x9d, 0xb5, 0xb7, 0x68,
+	0x07, 0x76, 0x67, 0x73, 0x36, 0x9d, 0x38, 0xd3, 0xe7, 0xee, 0xc7, 0x37, 0xcc, 0x3d, 0x3d, 0x7b,
+	0xff, 0xfa, 0xd5, 0xac, 0x4d, 0xec, 0x49, 0xe6, 0xe2, 0x9b, 0x28, 0xfa, 0x18, 0xea, 0x02, 0x65,
+	0x7a, 0xa9, 0xca, 0x86, 0x3a, 0xff, 0x36, 0xa4, 0x79, 0x56, 0xea, 0xec, 0x6f, 0x04, 0xb6, 0x35,
+	0x41, 0x1f, 0x02, 0x95, 0x8a, 0x0b, 0xe5, 0xea, 0xa9, 0x2b, 0x1e, 0x26, 0x6e, 0x98, 0xe5, 0x90,
+	0x61, 0x95, 0xb5, 0x35, 0x33, 0x2f, 0x09, 0x47, 0xd2, 0x21, 0xb4, 0x31, 0xf2, 0x6f, 0x6b, 0x2b,
+	0x5a, 0xdb, 0xc2, 0xc8, 0x37, 0x95, 0x47, 0xd0, 0x08, 0xb9, 0xf2, 0x96, 0x28, 0x64, 0x71, 0x73,
+	0x5d, 0xb3, 0xaa, 0x73, 0xbe, 0xc0, 0x4b, 0x27, 0x17, 0xb0, 0x8d, 0x92, 0x1e, 0xc2, 0xf6, 0x32,
+	0x88, 0x94, 0xec, 0xd6, 0x06, 0x64, 0x68, 0x8d, 0xf7, 0xff, 0x1e, 0xee, 0x59, 0x46, 0xb2, 0x5c,
+	0x63, 0x4f, 0xc1, 0x32, 0x9a, 0xa3, 0x4f, 0xff, 0x7f, 0xd3, 0xcc, 0x1d, 0xb3, 0xaf, 0x61, 0xf7,
+	0x74, 0x99, 0x46, 0x5f, 0xb2, 0xcb, 0x31, 0xa6, 0xfa, 0x0c, 0x5a, 0x5e, 0x0e, 0xbb, 0xb7, 0x22,
+	0xef, 0x9b, 0x91, 0x85, 0xb1, 0x48, 0xbd, 0xe3, 0x99, 0x9f, 0xf4, 0x00, 0xac, 0x6c, 0x8d, 0x56,
+	0x6e, 0x10, 0xf9, 0x78, 0x5d, 0xcc, 0x09, 0x34, 0xf4, 0x22, 0x43, 0x4e, 0xf6, 0x6e, 0xd6, 0x7d,
+	0xf2, 0x63, 0xdd, 0x27, 0xbf, 0xd6, 0x7d, 0xf2, 0x69, 0x27, 0xcb, 0x4d, 0x16, 0x8b, 0x1d, 0xfd,
+	0x92, 0x9e, 0xfc, 0x0e, 0x00, 0x00, 0xff, 0xff, 0x13, 0x18, 0x12, 0x0a, 0x88, 0x03, 0x00, 0x00,
 }
