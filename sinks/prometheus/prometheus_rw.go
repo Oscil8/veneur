@@ -139,8 +139,8 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 func (prw *RemoteWriteExporter) FlushOtherSamples(ctx context.Context, samples []ssf.SSFSample) {
 }
 
-func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) []*prompb.TimeSeries {
-	promMetrics := make([]*prompb.TimeSeries, 0, len(metrics))
+func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) []prompb.TimeSeries {
+	promMetrics := make([]prompb.TimeSeries, 0, len(metrics))
 
 	for _, m := range metrics {
 		if !sinks.IsAcceptableMetric(m, prw) {
@@ -150,8 +150,8 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		seenKeys := make(map[string]struct{}, len(m.Tags)+1)
 		SEEN := struct{}{} // sentinel value for set
 
-		promLabels := make([]*prompb.Label, 0, len(m.Tags)+1)
-		promLabels = append(promLabels, &prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
+		promLabels := make([]prompb.Label, 0, len(m.Tags)+1)
+		promLabels = append(promLabels, prompb.Label{Name: "__name__", Value: mapper.EscapeMetricName(m.Name)})
 		seenKeys["__name__"] = SEEN
 
 		allTags := make([]string, 0, len(m.Tags)+len(prw.tags))
@@ -171,10 +171,10 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 				continue
 			}
 			seenKeys[key] = SEEN
-			promLabels = append(promLabels, &prompb.Label{Name: key, Value: value})
+			promLabels = append(promLabels, prompb.Label{Name: key, Value: value})
 		}
 
-		promMetrics = append(promMetrics, &prompb.TimeSeries{
+		promMetrics = append(promMetrics, prompb.TimeSeries{
 			Labels:  promLabels,
 			Samples: []prompb.Sample{{Timestamp: m.Timestamp * time.Second.Nanoseconds() / 1e6, Value: m.Value}},
 		})
@@ -183,7 +183,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 	return promMetrics
 }
 
-func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []*prompb.TimeSeries, wg *sync.WaitGroup) {
+func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.TimeSeries, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	req, err := prw.buildRequest(tsSlice)
@@ -217,7 +217,7 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []*prompb
 	}
 }
 
-func (prw *RemoteWriteExporter) buildRequest(tsSlice []*prompb.TimeSeries) (req []byte, err error) {
+func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req []byte, err error) {
 	request := prompb.WriteRequest{Timeseries: tsSlice}
 
 	var reqBuf []byte

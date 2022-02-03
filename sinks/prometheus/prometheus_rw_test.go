@@ -71,9 +71,9 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 	batchSize := 3
 	expectedRequests := []prompb.WriteRequest{
 		{
-			Timeseries: []*prompb.TimeSeries{
+			Timeseries: []prompb.TimeSeries{
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__name__", Value: "a_b_gauge"},
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "quz"},
@@ -85,7 +85,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					},
 				},
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__name__", Value: "a_b_counter"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "abc"},
@@ -96,7 +96,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					},
 				},
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__name__", Value: "a_b_status"},
 						{Name: "default", Value: "abc"},
 						{Name: "host", Value: "localhost"},
@@ -108,9 +108,9 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 			},
 		},
 		{
-			Timeseries: []*prompb.TimeSeries{
+			Timeseries: []prompb.TimeSeries{
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__name__", Value: "a_b_gauge2"},
 						{Name: "foo", Value: "bar"},
 						{Name: "baz", Value: "zazz"},
@@ -122,7 +122,7 @@ func TestRemoteWriteMetricFlush(t *testing.T) {
 					},
 				},
 				{
-					Labels: []*prompb.Label{
+					Labels: []prompb.Label{
 						{Name: "__name__", Value: "a_b_counter2"},
 						{Name: "foo", Value: "bar"},
 						{Name: "default", Value: "override"},
