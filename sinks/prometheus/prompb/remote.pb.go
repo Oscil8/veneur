@@ -6,7 +6,6 @@
 
 	It is generated from these files:
 		remote.proto
-		rpc.proto
 		types.proto
 
 	It has these top-level messages:
@@ -15,12 +14,6 @@
 		ReadResponse
 		Query
 		QueryResult
-		TSDBSnapshotRequest
-		TSDBSnapshotResponse
-		TSDBCleanTombstonesRequest
-		TSDBCleanTombstonesResponse
-		SeriesDeleteRequest
-		SeriesDeleteResponse
 		Sample
 		TimeSeries
 		Label
