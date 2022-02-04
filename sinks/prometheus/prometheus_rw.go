@@ -85,13 +85,13 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 	span, _ := trace.StartSpanFromContext(ctx, "")
 	defer span.ClientFinish(prw.traceClient)
 
-	prommetrics, promMetadata := prw.finalizeMetrics(interMetrics)
+	promMetrics, promMetadata := prw.finalizeMetrics(interMetrics)
 
 	// break the metrics into chunks of approximately equal size, such that
 	// each chunk is less than the limit
 	// we compute the chunks using rounding-up integer division
-	workers := ((len(prommetrics) - 1) / prw.flushMaxPerBody) + 1
-	chunkSize := ((len(prommetrics) - 1) / workers) + 1
+	workers := ((len(promMetrics) - 1) / prw.flushMaxPerBody) + 1
+	chunkSize := ((len(promMetrics) - 1) / workers) + 1
 	prw.logger.WithField("workers", workers).Debug("Worker count chosen")
 	prw.logger.WithField("chunkSize", chunkSize).Debug("Chunk size chosen")
 	var wg sync.WaitGroup
@@ -116,11 +116,11 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 				<-semaphoreChan
 			}
 		}()
-		prw.flushMetadata(span.Attach(ctx), promMetadata, &wg)
+		prw.flushRequest(span.Attach(ctx), prompb.WriteRequest{Metadata: promMetadata}, &wg)
 	}()
 
 	for i := 0; i < workers; i++ {
-		chunk := prommetrics[i*chunkSize:]
+		chunk := promMetrics[i*chunkSize:]
 		if i < workers-1 {
 			// trim to chunk size unless this is the last one
 			chunk = chunk[:chunkSize]
@@ -139,16 +139,16 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 					<-semaphoreChan
 				}
 			}()
-			prw.flushPart(span.Attach(ctx), chunk, &wg)
+			prw.flushRequest(span.Attach(ctx), prompb.WriteRequest{Timeseries: chunk}, &wg)
 		}()
 	}
 	wg.Wait()
 	tags := map[string]string{"sink": prw.Name()}
 	span.Add(
 		ssf.Timing(sinks.MetricKeyMetricFlushDuration, time.Since(flushStart), time.Nanosecond, tags),
-		ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(len(prommetrics)), tags),
+		ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(len(promMetrics)), tags),
 	)
-	prw.logger.WithField("metrics", len(prommetrics)).Info("Completed flush to Prometheus Remote Write")
+	prw.logger.WithField("metrics", len(promMetrics)).Info("Completed flush to Prometheus Remote Write")
 	return nil
 }
 
@@ -224,10 +224,10 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 	return promMetrics, promMetadata
 }
 
-func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.TimeSeries, wg *sync.WaitGroup) {
+func (prw *RemoteWriteExporter) flushRequest(ctx context.Context, request prompb.WriteRequest, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	req, err := prw.buildRequest(prompb.WriteRequest{Timeseries: tsSlice})
+	req, err := prw.buildRequest(request)
 	if err != nil {
 		return // already logged failure
 	}
@@ -271,40 +271,6 @@ func (prw *RemoteWriteExporter) buildRequest(request prompb.WriteRequest) (req [
 		return nil, err
 	}
 	return compressed, nil
-}
-
-func (prw *RemoteWriteExporter) flushMetadata(ctx context.Context, mdSlice []prompb.MetricMetadata, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	req, err := prw.buildRequest(prompb.WriteRequest{Metadata: mdSlice})
-	if err != nil {
-		return // already logged failure
-	}
-
-	retries := 5
-	backoff := 50 * time.Millisecond
-	for {
-		_, _, err = prw.store(ctx, req)
-		if err != nil {
-			_, recoverable := err.(recoverableError)
-			if recoverable {
-				retries--
-				if retries < 0 {
-					prw.logger.Errorf("Failed: %v, aborting retries", err.Error())
-					return
-				}
-
-				prw.logger.Warnf("Failed: %v, retrying after %d ms (%d tries left)", err.Error(), backoff.Nanoseconds()/1e6, retries)
-				time.Sleep(backoff)
-				backoff *= 2
-				continue
-			}
-
-			// not recoverable
-			prw.logger.Errorf("Failed: %v, not retryable", err.Error())
-		}
-		return
-	}
 }
 
 // used to signify that the error from store is worth retry-ing
