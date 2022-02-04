@@ -101,32 +101,8 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 	semaphoreChan := make(chan struct{}, prw.flushMaxConcurrency)
 	defer close(semaphoreChan)
 
-	// first flush metadata (TODO: not every time ..)
-	// if metadata enabled..
-	wg.Add(1)
-	if prw.flushMaxConcurrency > 0 {
-		// block until the semaphore channel has room
-		semaphoreChan <- struct{}{}
-	}
-
-	go func() {
-		defer func() {
-			if prw.flushMaxConcurrency > 0 {
-				// clear a spot in the semaphore channel
-				<-semaphoreChan
-			}
-		}()
-		prw.flushRequest(span.Attach(ctx), prompb.WriteRequest{Metadata: promMetadata}, &wg)
-	}()
-
-	for i := 0; i < workers; i++ {
-		chunk := promMetrics[i*chunkSize:]
-		if i < workers-1 {
-			// trim to chunk size unless this is the last one
-			chunk = chunk[:chunkSize]
-		}
+	queuedRequest := func(request prompb.WriteRequest) {
 		wg.Add(1)
-
 		if prw.flushMaxConcurrency > 0 {
 			// block until the semaphore channel has room
 			semaphoreChan <- struct{}{}
@@ -139,8 +115,21 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 					<-semaphoreChan
 				}
 			}()
-			prw.flushRequest(span.Attach(ctx), prompb.WriteRequest{Timeseries: chunk}, &wg)
+			prw.flushRequest(span.Attach(ctx), request, &wg)
 		}()
+
+	}
+
+	// first flush metadata (TODO: not every time, check if metadata enabled..)
+	queuedRequest(prompb.WriteRequest{Metadata: promMetadata})
+
+	for i := 0; i < workers; i++ {
+		chunk := promMetrics[i*chunkSize:]
+		if i < workers-1 {
+			// trim to chunk size unless this is the last one
+			chunk = chunk[:chunkSize]
+		}
+		queuedRequest(prompb.WriteRequest{Timeseries: chunk})
 	}
 	wg.Wait()
 	tags := map[string]string{"sink": prw.Name()}
