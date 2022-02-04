@@ -227,7 +227,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.TimeSeries, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	req, err := prw.buildRequest(tsSlice)
+	req, err := prw.buildRequest(prompb.WriteRequest{Timeseries: tsSlice})
 	if err != nil {
 		return // already logged failure
 	}
@@ -258,9 +258,7 @@ func (prw *RemoteWriteExporter) flushPart(ctx context.Context, tsSlice []prompb.
 	}
 }
 
-func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req []byte, err error) {
-	request := prompb.WriteRequest{Timeseries: tsSlice}
-
+func (prw *RemoteWriteExporter) buildRequest(request prompb.WriteRequest) (req []byte, err error) {
 	var reqBuf []byte
 	if reqBuf, err = proto.Marshal(&request); err != nil {
 		prw.logger.Errorf("failed to marshal the WriteRequest %v", err)
@@ -278,7 +276,7 @@ func (prw *RemoteWriteExporter) buildRequest(tsSlice []prompb.TimeSeries) (req [
 func (prw *RemoteWriteExporter) flushMetadata(ctx context.Context, mdSlice []prompb.MetricMetadata, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	req, err := prw.buildMetadataRequest(mdSlice)
+	req, err := prw.buildRequest(prompb.WriteRequest{Metadata: mdSlice})
 	if err != nil {
 		return // already logged failure
 	}
@@ -307,23 +305,6 @@ func (prw *RemoteWriteExporter) flushMetadata(ctx context.Context, mdSlice []pro
 		}
 		return
 	}
-}
-
-func (prw *RemoteWriteExporter) buildMetadataRequest(mdSlice []prompb.MetricMetadata) (req []byte, err error) {
-	request := prompb.WriteRequest{Metadata: mdSlice}
-
-	var reqBuf []byte
-	if reqBuf, err = proto.Marshal(&request); err != nil {
-		prw.logger.Errorf("failed to marshal the md WriteRequest %v", err)
-		return nil, err
-	}
-
-	compressed := snappy.Encode(nil, reqBuf)
-	if err != nil {
-		prw.logger.Errorf("failed to compress the md WriteRequest %v", err)
-		return nil, err
-	}
-	return compressed, nil
 }
 
 // used to signify that the error from store is worth retry-ing
