@@ -23,7 +23,7 @@ RUN chmod 777 /usr/bin/protoc
 
 
 FROM deps AS src
-ARG BUILD_REF=v8.0.0-prw-sink
+ARG BUILD_REF=v8.0.0-prw-sink-add-metadata
 RUN mkdir -p /go/src/github.com/stripe
 WORKDIR /go/src/github.com/stripe
 RUN git clone --depth 1 https://github.com/Oscil8/veneur
