@@ -137,7 +137,8 @@ func (prw *RemoteWriteExporter) Flush(ctx context.Context, interMetrics []sample
 		ssf.Timing(sinks.MetricKeyMetricFlushDuration, time.Since(flushStart), time.Nanosecond, tags),
 		ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(len(promMetrics)), tags),
 	)
-	prw.logger.WithField("metrics", len(promMetrics)).Info("Completed flush to Prometheus Remote Write")
+	prw.logger.WithField("metrics", len(promMetrics)).WithField("metadata", len(promMetadata)).
+		Info("Completed flush to Prometheus Remote Write")
 	return nil
 }
 
