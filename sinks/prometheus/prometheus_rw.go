@@ -278,6 +278,7 @@ func (prw *RemoteWriteExporter) store(ctx context.Context, req []byte) (int, []b
 	httpReq.Header.Add("Content-Encoding", "snappy")
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", fmt.Sprintf("Venuer Prometheus RW sink"))
+	httpReq.Header.Set("Sysdig-Custom-Metric-Category", "PROMETHEUS_NON_COMPLIANT")
 
 	ctx, cancel := context.WithTimeout(ctx, 9*time.Second)
 	defer cancel()
