@@ -161,7 +161,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 			metadataStore[mappedName] = m.Type
 		}
 		if ok && mtype != m.Type {
-			// log
+			prw.logger.Warnf("Found inconsistent type for metric %s; %s vs %s", mappedName, mtype, m.Type)
 		}
 
 		seenKeys := make(map[string]struct{}, len(m.Tags)+1)
@@ -198,6 +198,7 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 	}
 
 	promMetadata := make([]prompb.MetricMetadata, 0, len(metadataStore))
+	unknownTypeMetrics := 0
 	for metricName, metricType := range metadataStore {
 		pm := prompb.MetricMetadata{MetricFamilyName: metricName}
 		switch metricType {
@@ -206,9 +207,13 @@ func (prw *RemoteWriteExporter) finalizeMetrics(metrics []samplers.InterMetric) 
 		case samplers.GaugeMetric:
 			pm.Type = prompb.MetricMetadata_GAUGE
 		default:
+			unknownTypeMetrics++
 			continue // skip unknown types
 		}
 		promMetadata = append(promMetadata, pm)
+	}
+	if unknownTypeMetrics > 0 {
+		prw.logger.Warnf("Ignored metadata for %d metrics with unsupported type", unknownTypeMetrics)
 	}
 	return promMetrics, promMetadata
 }
