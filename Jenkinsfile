@@ -5,7 +5,7 @@ pipeline {
 
     parameters {
         string(name: "BRANCH_REV", defaultValue: "v8.0.0-prw-sink", description: "Revision to build")
-        string(name: "IMAGE_TAG", defaultValue: "v8.0.0-7", description: "Image tag")
+        string(name: "IMAGE_TAG", defaultValue: "v8.0.0-8", description: "Image tag")
         booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Perform a dry run (does not push images)')
         booleanParam(name: 'PUSH_TO_QUAY', defaultValue: false, description: 'Push to Quay as well as Artifactory')
     }
