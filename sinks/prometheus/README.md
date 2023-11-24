@@ -1,16 +1,16 @@
 # Prometheus remote write (RW) sink
 
-This synk allows flushing data to a compatible prometheus remote write endpoint. 
+This sink allows flushing data to a compatible prometheus remote write endpoint. 
 
 # Configuration
-The sync supports the following configuration parameters, and they can be configured in 2 ways:
+The sink supports the following configuration parameters, and they can be configured in 2 ways:
 - Providing value in `config.yaml` file
 - Setting environment variables
 
 ## Configuration with yaml file
 
 ### Required parameters
-These parameters must be provided to correctly enble the RW sink.
+These parameters must be provided to correctly enable the RW sink.
 #### `prometheus_remote_write_address`
 
   The URL to be used as the remote write destination. 
@@ -35,7 +35,7 @@ The following parameters can be configured but the application will work with th
 
 #### `prometheus_remote_flush_max_per_body`
 
-  This says how many metrics to include in the body of each Remote Write request. A sample will be split into multiple ones that will be sent in parallel if the limit is exceeded. 
+  How many metrics to include in the body of each Remote Write request. A sample will be split into multiple ones that will be sent in parallel if the limit is exceeded. 
   
   Default value:
   ```
@@ -63,7 +63,7 @@ The following parameters can be configured but the application will work with th
 
 #### `prometheus_remote_flush_interval`
 
-  Backoff time (in milliseconds) with which we will send requests to the RW endpoint.
+  Backoff time (in milliseconds) before retrying failed request.
   
   
   Default value:
@@ -83,7 +83,7 @@ The following parameters can be configured but the application will work with th
 
 ## Configuration via environment variables
 
-The same values can be configured with specifying environment variables, for instance via k8s deployment configuration. Here are some example values:
+The same parameters can be configured with specifying environment variables, for instance via k8s deployment configuration. Here are some example values:
 ```
     - name: VENEUR_PROMETHEUSREMOTEWRITEADDRESS
       value: "https://destination.api/prometheus/remote/write"
