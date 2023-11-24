@@ -9,6 +9,10 @@
 * Option to flush sinks on shutdown. Thanks, [csolidum](https://github.com/csolidum)!
 * Support for [extended clientside aggregation](https://github.com/DataDog/datadog-go/blob/master/README.md#client-side-aggregation). Thanks, [praboud-stripe](https://github.com/praboud-stripe)!
 
+## Added in fork
+### 14.2.0-rw-4
+- Implemented request buffering for prometheus remote write sink to tollerate temprary issues of the endpoint and retry failed requests. 
+
 ## Bugfixes
 * A fix for forwarding metrics with gRPC using the kubernetes discoverer. Thanks, [androohan](https://github.com/androohan)!
 * Regenerate testing certs/CA that have expired and have broken tests. Thanks, [randallm](https://github.com/randallm)
