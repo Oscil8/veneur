@@ -7,11 +7,12 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/sirupsen/logrus"
 	"github.com/stripe/veneur/v14"
-	"github.com/stripe/veneur/v14/sinks/attribution"
 	"github.com/stripe/veneur/v14/sinks/cortex"
 	"github.com/stripe/veneur/v14/sinks/datadog"
 	"github.com/stripe/veneur/v14/sinks/debug"
+	"github.com/stripe/veneur/v14/sinks/falconer"
 	"github.com/stripe/veneur/v14/sinks/kafka"
+	"github.com/stripe/veneur/v14/sinks/lightstep"
 	"github.com/stripe/veneur/v14/sinks/localfile"
 	"github.com/stripe/veneur/v14/sinks/newrelic"
 	"github.com/stripe/veneur/v14/sinks/prometheus"
@@ -19,6 +20,7 @@ import (
 	"github.com/stripe/veneur/v14/sinks/signalfx"
 	"github.com/stripe/veneur/v14/sinks/splunk"
 	"github.com/stripe/veneur/v14/sinks/xray"
+	"github.com/stripe/veneur/v14/sources/openmetrics"
 	"github.com/stripe/veneur/v14/ssf"
 	"github.com/stripe/veneur/v14/trace"
 )
@@ -35,22 +37,42 @@ func init() {
 
 func main() {
 	flag.Parse()
+	logger := logrus.StandardLogger()
 
 	if configFile == nil || *configFile == "" {
-		logrus.Fatal("You must specify a config file")
+		logger.Fatal("You must specify a config file")
 	}
 
-	conf, err := veneur.ReadConfig(*configFile)
+	conf, err := veneur.ReadConfig(logrus.NewEntry(logger), *configFile)
 	if err != nil {
-		if _, ok := err.(*veneur.UnknownConfigKeys); ok {
+		_, ok := err.(*veneur.UnknownConfigKeys)
+		if ok {
 			if *validateConfigStrict {
-				logrus.WithError(err).Fatal("Config contains invalid or deprecated keys")
+				logger.WithError(err).Fatal("Config contains invalid or deprecated keys")
 			} else {
-				logrus.WithError(err).Warn("Config contains invalid or deprecated keys")
+				logger.WithError(err).Warn("Config contains invalid or deprecated keys")
 			}
 		} else {
-			logrus.WithError(err).Fatal("Error reading config file")
+			logger.WithError(err).Fatal("Error reading config file")
 		}
+	}
+
+	if conf.SentryDsn.Value != "" {
+		err = sentry.Init(sentry.ClientOptions{
+			Dsn:        conf.SentryDsn.Value,
+			ServerName: conf.Hostname,
+			Release:    veneur.VERSION,
+		})
+		if err != nil {
+			logger.WithError(err).Fatal("failed to initialzie Sentry")
+		}
+		logger.AddHook(veneur.SentryHook{
+			Level: []logrus.Level{
+				logrus.ErrorLevel,
+				logrus.FatalLevel,
+				logrus.PanicLevel,
+			},
+		})
 	}
 
 	if *validateConfig {
@@ -59,35 +81,38 @@ func main() {
 	if !conf.Features.MigrateMetricSinks {
 		datadog.MigrateConfig(&conf)
 		debug.MigrateConfig(&conf)
+		falconer.MigrateConfig(&conf)
 		localfile.MigrateConfig(&conf)
+		lightstep.MigrateConfig(&conf)
 		newrelic.MigrateConfig(&conf)
 		s3.MigrateConfig(&conf)
 		prometheus.MigrateConfig(&conf)
+		prometheus.MigrateRWConfig(&conf)
 		err = signalfx.MigrateConfig(&conf)
 		if err != nil {
-			logrus.WithError(err).Fatal("error migrating signalfx config")
+			logger.WithError(err).Fatal("error migrating signalfx config")
 		}
 		err = kafka.MigrateConfig(&conf)
 		if err != nil {
-			logrus.WithError(err).Fatal("error migrating kafka config")
+			logger.WithError(err).Fatal("error migrating kafka config")
 		}
 		err = splunk.MigrateConfig(&conf)
 		if err != nil {
-			logrus.WithError(err).Fatal("error migrating splunk config")
+			logger.WithError(err).Fatal("error migrating splunk config")
 		}
 		xray.MigrateConfig(&conf)
 	}
 
-	logger := logrus.StandardLogger()
 	server, err := veneur.NewFromConfig(veneur.ServerConfig{
 		Config: conf,
 		Logger: logger,
-		MetricSinkTypes: veneur.MetricSinkTypes{
-			// TODO(arnavdugar): Migrate metric sink types.
-			"attribution": {
-				Create:      attribution.Create,
-				ParseConfig: attribution.ParseConfig,
+		SourceTypes: veneur.SourceTypes{
+			"openmetrics": {
+				Create:      openmetrics.Create,
+				ParseConfig: openmetrics.ParseConfig,
 			},
+		},
+		MetricSinkTypes: veneur.MetricSinkTypes{
 			"cortex": {
 				Create:      cortex.Create,
 				ParseConfig: cortex.ParseConfig,
@@ -116,6 +141,10 @@ func main() {
 				Create:      prometheus.CreateMetricSink,
 				ParseConfig: prometheus.ParseMetricConfig,
 			},
+			"prometheus_rw": {
+				Create:      prometheus.CreateRWMetricSink,
+				ParseConfig: prometheus.ParseRWMetricConfig,
+			},
 			"s3": {
 				Create:      s3.Create,
 				ParseConfig: s3.ParseConfig,
@@ -126,7 +155,6 @@ func main() {
 			},
 		},
 		SpanSinkTypes: veneur.SpanSinkTypes{
-			// TODO(arnavdugar): Migrate span sink types.
 			"datadog": {
 				Create:      datadog.CreateSpanSink,
 				ParseConfig: datadog.ParseSpanConfig,
@@ -135,9 +163,17 @@ func main() {
 				Create:      debug.CreateSpanSink,
 				ParseConfig: debug.ParseSpanConfig,
 			},
+			"falconer": {
+				Create:      falconer.Create,
+				ParseConfig: falconer.ParseConfig,
+			},
 			"kafka": {
 				Create:      kafka.CreateSpanSink,
 				ParseConfig: kafka.ParseSpanConfig,
+			},
+			"lightstep": {
+				Create:      lightstep.CreateSpanSink,
+				ParseConfig: lightstep.ParseSpanConfig,
 			},
 			"newrelic": {
 				Create:      newrelic.CreateSpanSink,
@@ -153,29 +189,8 @@ func main() {
 			},
 		},
 	})
-	veneur.SetLogger(logger)
 	if err != nil {
-		e := err
-		if conf.SentryDsn.Value != "" {
-			err = sentry.Init(sentry.ClientOptions{
-				Dsn: conf.SentryDsn.Value,
-			})
-			if err != nil {
-				logrus.WithError(err).Error("Error initializing Sentry client")
-			}
-
-			event := sentry.NewEvent()
-			event.Message = e.Error()
-			hostname, _ := os.Hostname()
-			if hostname != "" {
-				event.ServerName = hostname
-			}
-
-			sentry.CaptureEvent(event)
-			sentry.Flush(veneur.SentryFlushTimeout)
-		}
-
-		logrus.WithError(e).Fatal("Could not initialize server")
+		logger.WithError(err).Fatal("Could not initialize server")
 	}
 	ssf.NamePrefix = "veneur."
 
@@ -194,7 +209,5 @@ func main() {
 
 	if conf.HTTPAddress != "" || conf.GrpcAddress != "" {
 		server.Serve()
-	} else {
-		select {}
 	}
 }

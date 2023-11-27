@@ -52,8 +52,7 @@ func TestSortableJSONMetrics(t *testing.T) {
 }
 
 func TestSortableJSONMetricHashing(t *testing.T) {
-	packet, err := (&samplers.Parser{}).ParseMetric([]byte("foo:1|h|#bar"))
-	assert.NoError(t, err, "should have parsed test packet")
+	packet := parseOneMetric(t, &samplers.Parser{}, []byte("foo:1|h|#bar"))
 
 	testList := []samplers.JSONMetric{{
 		MetricKey: packet.MetricKey,
@@ -228,23 +227,6 @@ func TestServerImportUncompressedInvalid(t *testing.T) {
 // if it receives what amounts to an empty struct,
 // because that's usually the sign of an error
 func TestServerImportEmptyError(t *testing.T) {
-
-	// explicitly use the wrong type here
-	data := []struct {
-		Bad string
-	}{
-		{"Foo"},
-		{"Bar"},
-	}
-	testServerImportHelper(t, data)
-}
-
-// TestServerImportEmptyError tests that
-// the global veneur instance returns an error
-// if it receives what amounts to a slice of empty structs
-// because that's usually the sign of an error
-func TestServerImportEmptyStructError(t *testing.T) {
-
 	// explicitly use the wrong type here
 	data := []struct {
 		Bad string
@@ -403,7 +385,9 @@ func BenchmarkNewSortableJSONMetrics(b *testing.B) {
 
 	w := httptest.NewRecorder()
 
-	_, jsonMetrics, err := unmarshalMetricsFromHTTP(context.Background(), trace.DefaultClient, w, r)
+	logger := logrus.NewEntry(logrus.New())
+	_, jsonMetrics, err := unmarshalMetricsFromHTTP(
+		context.Background(), trace.DefaultClient, w, r, logger)
 	assert.NoError(b, err)
 
 	b.ResetTimer()

@@ -20,6 +20,7 @@ import (
 	"github.com/stripe/veneur/v14/sinks"
 	"github.com/stripe/veneur/v14/ssf"
 	"github.com/stripe/veneur/v14/trace"
+	"github.com/stripe/veneur/v14/util/matcher"
 	"google.golang.org/grpc/status"
 )
 
@@ -49,7 +50,7 @@ func (s *Server) Flush(ctx context.Context) {
 
 	// TODO Concurrency
 	for _, sink := range s.metricSinks {
-		sink.FlushOtherSamples(span.Attach(ctx), samples)
+		sink.sink.FlushOtherSamples(span.Attach(ctx), samples)
 	}
 
 	go s.flushTraces(span.Attach(ctx))
@@ -78,15 +79,17 @@ func (s *Server) Flush(ctx context.Context) {
 	s.reportMetricsFlushCounts(ms)
 
 	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
 	if s.IsLocal() {
 		wg.Add(1)
-		// Forward over gRPC or HTTP depending on the configuration
-		if s.forwardUseGRPC {
+		switch s.proxyProtocol {
+		case ProxyProtocolGrpcStream, ProxyProtocolGrpcSingle:
 			go func() {
-				s.forwardGRPC(span.Attach(ctx), tempMetrics)
+				s.forwardGRPC(span.Attach(ctx), tempMetrics, s.proxyProtocol)
 				wg.Done()
 			}()
-		} else {
+		case ProxyProtocolRest:
 			go func() {
 				s.flushForward(span.Attach(ctx), tempMetrics)
 				wg.Done()
@@ -108,7 +111,7 @@ func (s *Server) Flush(ctx context.Context) {
 			metric.Sinks = make(samplers.RouteInformation)
 			for _, config := range s.Config.MetricSinkRouting {
 				var sinks []string
-				if config.Match(metric.Name, metric.Tags) {
+				if matcher.Match(config.Match, metric.Name, metric.Tags) {
 					sinks = config.Sinks.Matched
 				} else {
 					sinks = config.Sinks.NotMatched
@@ -122,31 +125,53 @@ func (s *Server) Flush(ctx context.Context) {
 
 	for _, sink := range s.metricSinks {
 		wg.Add(1)
-		go func(ms sinks.MetricSink) {
+		go func(sink internalMetricSink) {
 			filteredMetrics := finalMetrics
 			if s.Config.Features.EnableMetricSinkRouting {
-				sinkName := ms.Name()
+				sinkName := sink.sink.Name()
 				filteredMetrics = []samplers.InterMetric{}
 				for _, metric := range finalMetrics {
 					_, ok := metric.Sinks[sinkName]
 					if !ok {
 						continue
 					}
+					filteredTags := []string{}
+					if len(sink.stripTags) == 0 {
+						filteredTags = metric.Tags
+					} else {
+					tagLoop:
+						for _, tag := range metric.Tags {
+							for _, tagMatcher := range sink.stripTags {
+								if tagMatcher.Match(tag) {
+									continue tagLoop
+								}
+							}
+							filteredTags = append(filteredTags, tag)
+						}
+					}
+					metric.Tags = filteredTags
 					filteredMetrics = append(filteredMetrics, metric)
 				}
 			}
 			flushStart := time.Now()
-			err := ms.Flush(span.Attach(ctx), filteredMetrics)
+			err := sink.sink.Flush(span.Attach(ctx), filteredMetrics)
+			if err == nil {
+				s.logger.WithFields(logrus.Fields{
+					"sink":    sink.sink.Name(),
+					"success": true,
+				}).Info(sinks.FlushCompleteMessage)
+			} else {
+				s.logger.WithError(err).WithFields(logrus.Fields{
+					"sink":    sink.sink.Name(),
+					"success": false,
+				}).Warn(sinks.FlushCompleteMessage)
+			}
 			span.Add(ssf.Timing(
 				sinks.MetricKeyMetricFlushDuration, time.Since(flushStart),
-				time.Nanosecond, map[string]string{"sink": ms.Name()}))
-			if err != nil {
-				log.WithError(err).WithField("sink", ms.Name()).Warn("Error flushing sink")
-			}
+				time.Nanosecond, map[string]string{"sink": sink.sink.Name()}))
 			wg.Done()
 		}(sink)
 	}
-	wg.Wait()
 }
 
 func (s *Server) tallyTimeseries() int64 {
@@ -194,7 +219,7 @@ func (s *Server) tallyMetrics(percentiles []float64) ([]WorkerMetrics, metricsSu
 	ms := metricsSummary{}
 
 	for i, w := range s.Workers {
-		log.WithField("worker", i).Debug("Flushing")
+		s.logger.WithField("worker", i).Debug("Flushing")
 		wm := w.Flush()
 		tempMetrics = append(tempMetrics, wm)
 
@@ -395,7 +420,7 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 		for _, count := range wm.globalCounters {
 			jm, err := count.Export()
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				s.logger.WithFields(logrus.Fields{
 					logrus.ErrorKey: err,
 					"type":          "counter",
 					"name":          count.Name,
@@ -407,7 +432,7 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 		for _, gauge := range wm.globalGauges {
 			jm, err := gauge.Export()
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				s.logger.WithFields(logrus.Fields{
 					logrus.ErrorKey: err,
 					"type":          "gauge",
 					"name":          gauge.Name,
@@ -419,7 +444,7 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 		for _, histo := range wm.histograms {
 			jm, err := histo.Export()
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				s.logger.WithFields(logrus.Fields{
 					logrus.ErrorKey: err,
 					"type":          "histogram",
 					"name":          histo.Name,
@@ -431,7 +456,7 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 		for _, set := range wm.sets {
 			jm, err := set.Export()
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				s.logger.WithFields(logrus.Fields{
 					logrus.ErrorKey: err,
 					"type":          "set",
 					"name":          set.Name,
@@ -443,7 +468,7 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 		for _, timer := range wm.timers {
 			jm, err := timer.Export()
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				s.logger.WithFields(logrus.Fields{
 					logrus.ErrorKey: err,
 					"type":          "timer",
 					"name":          timer.Name,
@@ -458,15 +483,17 @@ func (s *Server) flushForward(ctx context.Context, wms []WorkerMetrics) {
 	s.Statsd.TimeInMilliseconds("forward.duration_ns", float64(time.Since(exportStart).Nanoseconds()), []string{"part:export"}, 1.0)
 	s.Statsd.Count("forward.post_metrics_total", int64(len(jsonMetrics)), nil, 1.0)
 	if len(jsonMetrics) == 0 {
-		log.Debug("Nothing to forward, skipping.")
+		s.logger.Debug("Nothing to forward, skipping.")
 		return
 	}
 
 	// the error has already been logged (if there was one), so we only care
 	// about the success case
 	endpoint := fmt.Sprintf("%s/import", s.ForwardAddr)
-	if vhttp.PostHelper(span.Attach(ctx), s.HTTPClient, s.TraceClient, http.MethodPost, endpoint, jsonMetrics, "forward", true, nil, log) == nil {
-		log.WithFields(logrus.Fields{
+	if vhttp.PostHelper(
+		span.Attach(ctx), s.HTTPClient, s.TraceClient, http.MethodPost, endpoint,
+		jsonMetrics, "forward", true, nil, s.logger) == nil {
+		s.logger.WithFields(logrus.Fields{
 			"metrics":     len(jsonMetrics),
 			"endpoint":    endpoint,
 			"forwardAddr": s.ForwardAddr,
@@ -478,7 +505,7 @@ func (s *Server) flushTraces(ctx context.Context) {
 	s.ssfInternalMetrics.Range(func(keyI, valueI interface{}) bool {
 		key, ok := keyI.(string)
 		if !ok {
-			log.WithFields(logrus.Fields{
+			s.logger.WithFields(logrus.Fields{
 				"key":  keyI,
 				"type": reflect.TypeOf(keyI),
 			}).Error("received non-string key")
@@ -487,7 +514,7 @@ func (s *Server) flushTraces(ctx context.Context) {
 
 		value, ok := valueI.(*ssfServiceSpanMetrics)
 		if !ok {
-			log.WithFields(logrus.Fields{
+			s.logger.WithFields(logrus.Fields{
 				"value": valueI,
 				"type":  reflect.TypeOf(valueI),
 			}).Error("received non-struct value")
@@ -496,7 +523,7 @@ func (s *Server) flushTraces(ctx context.Context) {
 
 		tags := strings.Split(key, ",")
 		if len(tags) != 2 {
-			log.WithFields(logrus.Fields{
+			s.logger.WithFields(logrus.Fields{
 				"key":    key,
 				"length": len(tags),
 			}).Error("received key of incorrect format")
@@ -513,7 +540,9 @@ func (s *Server) flushTraces(ctx context.Context) {
 }
 
 // forwardGRPC forwards all input metrics to a downstream Veneur, over gRPC.
-func (s *Server) forwardGRPC(ctx context.Context, wms []WorkerMetrics) {
+func (s *Server) forwardGRPC(
+	ctx context.Context, wms []WorkerMetrics, protocol ProxyProtocol,
+) {
 	span, _ := trace.StartSpanFromContext(ctx, "")
 	span.SetTag("protocol", "grpc")
 	defer span.ClientFinish(s.TraceClient)
@@ -523,7 +552,7 @@ func (s *Server) forwardGRPC(ctx context.Context, wms []WorkerMetrics) {
 	// Collect all of the forwardable metrics from the various WorkerMetrics.
 	var metrics []*metricpb.Metric
 	for _, wm := range wms {
-		metrics = append(metrics, wm.ForwardableMetrics(s.TraceClient)...)
+		metrics = append(metrics, wm.ForwardableMetrics(s.TraceClient, s.logger)...)
 	}
 
 	span.Add(
@@ -535,11 +564,11 @@ func (s *Server) forwardGRPC(ctx context.Context, wms []WorkerMetrics) {
 	)
 
 	if len(metrics) == 0 {
-		log.Debug("Nothing to forward, skipping.")
+		s.logger.Debug("Nothing to forward, skipping.")
 		return
 	}
 
-	entry := log.WithFields(logrus.Fields{
+	entry := s.logger.WithFields(logrus.Fields{
 		"metrics":     len(metrics),
 		"destination": s.ForwardAddr,
 		"protocol":    "grpc",
@@ -549,7 +578,12 @@ func (s *Server) forwardGRPC(ctx context.Context, wms []WorkerMetrics) {
 	c := forwardrpc.NewForwardClient(s.grpcForwardConn)
 
 	grpcStart := time.Now()
-	_, err := c.SendMetrics(ctx, &forwardrpc.MetricList{Metrics: metrics})
+	var err error
+	if protocol == ProxyProtocolGrpcSingle {
+		err = ForwardGrpcSingle(ctx, c, metrics)
+	} else {
+		err = ForwardGrpcStream(ctx, c, metrics)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			// We exceeded the deadline of the flush context.
@@ -573,4 +607,27 @@ func (s *Server) forwardGRPC(ctx context.Context, wms []WorkerMetrics) {
 			map[string]string{"part": "grpc"}),
 		ssf.Count("forward.error_total", 0, nil),
 	)
+}
+
+func ForwardGrpcSingle(
+	ctx context.Context, client forwardrpc.ForwardClient,
+	metrics []*metricpb.Metric,
+) error {
+	_, err := client.SendMetrics(ctx, &forwardrpc.MetricList{Metrics: metrics})
+	return err
+}
+
+func ForwardGrpcStream(
+	ctx context.Context, client forwardrpc.ForwardClient,
+	metrics []*metricpb.Metric,
+) error {
+	sendMetricsClient, err := client.SendMetricsV2(ctx)
+	if err != nil {
+		return err
+	}
+	for _, metric := range metrics {
+		sendMetricsClient.Send(metric)
+	}
+	_, err = sendMetricsClient.CloseAndRecv()
+	return err
 }

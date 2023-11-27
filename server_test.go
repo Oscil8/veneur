@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"sync"
 
 	"math/rand"
@@ -47,7 +48,7 @@ var DebugMode bool
 
 func seedRand() {
 	seed := time.Now().Unix()
-	log.WithFields(logrus.Fields{
+	logrus.New().WithFields(logrus.Fields{
 		"randSeed": seed,
 	}).Info("Re-seeding random number generator")
 	rand.Seed(seed)
@@ -89,8 +90,8 @@ func generateConfig(forwardAddr string) Config {
 				Host:   "localhost:0",
 			},
 		}},
-		HTTPAddress:    fmt.Sprintf("localhost:0"),
-		GrpcAddress:    fmt.Sprintf("localhost:0"),
+		HTTPAddress:    "localhost:0",
+		GrpcAddress:    "localhost:0",
 		ForwardAddress: forwardAddr,
 		NumWorkers:     4,
 		FlushFile:      "",
@@ -166,7 +167,9 @@ func setupVeneurServer(t testing.TB, config Config, transport http.RoundTripper,
 		bhs, _ := blackhole.NewBlackholeMetricSink()
 		mSink = bhs
 	}
-	server.metricSinks = append(server.metricSinks, mSink)
+	server.metricSinks = append(server.metricSinks, internalMetricSink{
+		sink: mSink,
+	})
 
 	if sSink == nil {
 		// Install a blackhole sink if we have no other sinks
@@ -208,7 +211,7 @@ func (c *channelMetricSink) Flush(ctx context.Context, metrics []samplers.InterM
 }
 
 func (c *channelMetricSink) FlushOtherSamples(ctx context.Context, events []ssf.SSFSample) {
-	return
+	// Do nothing.
 }
 
 // fixture sets up a mock Datadog API server and Veneur
@@ -588,7 +591,6 @@ func TestUDPMetrics(t *testing.T) {
 }
 
 func TestUnixSocketMetrics(t *testing.T) {
-	ctx := context.TODO()
 	tdir, err := ioutil.TempDir("", "unixmetrics_statsd")
 	require.NoError(t, err)
 	defer os.RemoveAll(tdir)
@@ -994,9 +996,14 @@ func TestTCPMetrics(t *testing.T) {
 // TestHandleTCPGoroutineTimeout verifies that an idle TCP connection doesn't block forever.
 func TestHandleTCPGoroutineTimeout(t *testing.T) {
 	const readTimeout = 30 * time.Millisecond
-	s := &Server{tcpReadTimeout: readTimeout, Workers: []*Worker{
-		&Worker{PacketChan: make(chan samplers.UDPMetric, 1)},
-	}}
+	s := &Server{
+		logger:         logrus.NewEntry(logrus.New()),
+		tcpReadTimeout: readTimeout,
+		Workers: []*Worker{{
+			logger:     logrus.New(),
+			PacketChan: make(chan samplers.UDPMetric, 1),
+		}},
+	}
 
 	// make a real TCP connection ... to ourselves
 	listener, err := net.Listen("tcp", "localhost:0")
@@ -1208,7 +1215,6 @@ func BenchmarkSendSSFUDP(b *testing.B) {
 	}
 	l.Close()
 	close(s.shutdown)
-	return
 }
 
 func BenchmarkServerFlush(b *testing.B) {
@@ -1219,7 +1225,10 @@ func BenchmarkServerFlush(b *testing.B) {
 	f := newFixture(b, config, nil, nil)
 
 	bhs, _ := blackhole.NewBlackholeMetricSink()
-	f.server.metricSinks = []sinks.MetricSink{bhs}
+
+	f.server.metricSinks = []internalMetricSink{{
+		sink: bhs,
+	}}
 	defer f.Close()
 
 	b.ResetTimer()
@@ -1408,7 +1417,7 @@ func TestGenerateExcludeTags(t *testing.T) {
 
 func generateSSFPackets(tb testing.TB, length int) [][]byte {
 	input := make([][]byte, length)
-	for i, _ := range input {
+	for i := range input {
 		p := make([]byte, 10)
 		_, err := rand.Read(p)
 		if err != nil {
@@ -1456,7 +1465,9 @@ func TestServeStopGRPC(t *testing.T) {
 	}()
 
 	// Stop the gRPC server only.  This should cause Serve to exit
-	s.gRPCStop()
+	assert.Len(t, s.sources, 1)
+	assert.Equal(t, s.sources[0].source.Name(), "proxy")
+	s.sources[0].source.Stop()
 
 	select {
 	case <-done:
@@ -1634,7 +1645,7 @@ func BenchmarkHandleSSF(b *testing.B) {
 	packets := generateSSFPackets(b, LEN)
 	spans := make([]*ssf.SSFSpan, len(packets))
 
-	for i, _ := range spans {
+	for i := range spans {
 		span, err := protocol.ParseSSF(packets[i])
 		assert.NoError(b, err)
 		spans[i] = span

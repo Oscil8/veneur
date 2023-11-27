@@ -6,10 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/stripe/veneur/v14/samplers"
+	"github.com/stripe/veneur/v14/sinks"
 	"github.com/stripe/veneur/v14/ssf"
 	"github.com/stripe/veneur/v14/trace"
 	"github.com/stripe/veneur/v14/util"
+	"github.com/stripe/veneur/v14/util/matcher"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -91,6 +94,7 @@ func forwardGRPCTestMetrics() []*samplers.UDPMetric {
 }
 
 func TestServerFlushGRPC(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
 	done := make(chan []string)
 	testServer := forwardtest.NewServer(func(ms []*metricpb.Metric) {
 		var names []string
@@ -127,11 +131,11 @@ func TestServerFlushGRPC(t *testing.T) {
 	// Wait until the running server has flushed out the metrics for us:
 	select {
 	case v := <-done:
-		log.Print("got the goods")
+		logger.Print("got the goods")
 		assert.ElementsMatch(t, expected, v,
 			"Flush didn't output the right metrics")
 	case <-time.After(time.Second):
-		log.Print("timed out")
+		logger.Print("timed out")
 		t.Fatal("Timed out waiting for the gRPC server to receive the flush")
 	}
 }
@@ -336,4 +340,75 @@ func TestTallyTimeseries(t *testing.T) {
 
 	summary := f.server.tallyTimeseries()
 	assert.Equal(t, int64(2), summary)
+}
+
+func TestStripTags(t *testing.T) {
+	config := localConfig()
+	config.Features.EnableMetricSinkRouting = true
+	config.MetricSinks = []SinkConfig{{
+		Kind: "channel",
+		Name: "channel",
+		StripTags: []matcher.TagMatcher{
+			matcher.CreateTagMatcher(&matcher.TagMatcherConfig{
+				Kind:  "prefix",
+				Value: "foo",
+			})},
+	}}
+	config.MetricSinkRouting = []SinkRoutingConfig{{
+		Name: "default",
+		Match: []matcher.Matcher{{
+			Name: matcher.CreateNameMatcher(&matcher.NameMatcherConfig{
+				Kind: "any",
+			}),
+			Tags: []matcher.TagMatcher{},
+		}},
+		Sinks: SinkRoutingSinks{
+			Matched: []string{"channel"},
+		},
+	}}
+
+	channel := make(chan []samplers.InterMetric)
+	server, err := NewFromConfig(ServerConfig{
+		Logger: logrus.New(),
+		Config: config,
+		MetricSinkTypes: MetricSinkTypes{
+			"channel": {
+				Create: func(
+					server *Server, s2 string, logger *logrus.Entry, config Config,
+					sinkConfig MetricSinkConfig,
+				) (sinks.MetricSink, error) {
+					sink, err := NewChannelMetricSink(channel)
+					if err != nil {
+						return nil, err
+					}
+					return sink, nil
+				},
+				ParseConfig: func(s string, i interface{}) (MetricSinkConfig, error) {
+					return nil, nil
+				},
+			},
+		},
+	})
+	assert.NoError(t, err)
+	go server.Start()
+	defer server.Shutdown()
+
+	server.Workers[0].PacketChan <- samplers.UDPMetric{
+		MetricKey: samplers.MetricKey{
+			Name:       "test.metric",
+			Type:       "counter",
+			JoinedTags: "foo:value1,bar:value2",
+		},
+		Digest:     0,
+		Scope:      samplers.LocalOnly,
+		Tags:       []string{"foo:value1", "bar:value2"},
+		Value:      1.0,
+		SampleRate: 1.0,
+	}
+
+	result := <-channel
+	assert.Len(t, result, 1)
+	assert.Equal(t, "test.metric", result[0].Name)
+	assert.Len(t, result[0].Tags, 1)
+	assert.Equal(t, "bar:value2", result[0].Tags[0])
 }

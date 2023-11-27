@@ -22,6 +22,11 @@ const MetricKeyTotalMetricsFlushed = "sink.metrics_flushed_total"
 // skipped, not applicable to this MetricSink.
 const MetricKeyTotalMetricsSkipped = "sink.metrics_skipped_total"
 
+// MetricKeyTotalMetricsDropped should be emitted as a counter by a MetricSink
+// if possible. Tagged with `sink:sink.Name()`. Track the number of metrics
+// dropped, not applicable to this MetricSink.
+const MetricKeyTotalMetricsDropped = "sink.metrics_dropped_total"
+
 // EventReportedCount number of events processed by a sink. Tagged with
 // `sink:sink.Name()`.
 const EventReportedCount = "sink.events_reported_total"
@@ -98,3 +103,5 @@ type SpanSink interface {
 	// signal for the sink to write out if it was buffering or something.
 	Flush()
 }
+
+const FlushCompleteMessage = "Flush complete"

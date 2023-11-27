@@ -27,29 +27,48 @@ const (
 	MaxConns = 100
 	// DefaultRemoteTimeout after which a write request will time out
 	DefaultRemoteTimeout = time.Duration(30 * time.Second)
+	// DefaultAuthorizationType if a credential is supplied
+	DefaultAuthorizationType = "Bearer"
 )
 
 // CortexMetricSink writes metrics to one or more configured Cortex instances
 // using the prometheus remote-write API. For specifications, see
 // https://github.com/prometheus/compliance/tree/main/remote_write
 type CortexMetricSink struct {
-	URL           string
-	RemoteTimeout time.Duration
-	ProxyURL      string
-	client        *http.Client
-	logger        *logrus.Entry
-	name          string
-	tags          map[string]string
-	traceClient   *trace.Client
+	URL            string
+	RemoteTimeout  time.Duration
+	ProxyURL       string
+	Client         *http.Client
+	logger         *logrus.Entry
+	name           string
+	tags           map[string]string
+	traceClient    *trace.Client
+	addHeaders     map[string]string
+	basicAuth      *BasicAuthType
+	batchWriteSize int
+}
+
+var _ sinks.MetricSink = (*CortexMetricSink)(nil)
+
+type BasicAuthType struct {
+	Username util.StringSecret `yaml:"username"`
+	Password util.StringSecret `yaml:"password"`
 }
 
 // TODO: implement queue config options, at least
 // max_samples_per_send, max_shards, and capacity
 // https://prometheus.io/docs/prometheus/latest/configuration/configuration/#remote_write
 type CortexMetricSinkConfig struct {
-	URL           string        `yaml:"url"`
-	RemoteTimeout time.Duration `yaml:"remote_timeout"`
-	ProxyURL      string        `yaml:"proxy_url"`
+	URL            string            `yaml:"url"`
+	RemoteTimeout  time.Duration     `yaml:"remote_timeout"`
+	ProxyURL       string            `yaml:"proxy_url"`
+	BatchWriteSize int               `yaml:"batch_write_size"`
+	Headers        map[string]string `yaml:"headers"`
+	BasicAuth      BasicAuthType     `yaml:"basic_auth"`
+	Authorization  struct {
+		Type       string            `yaml:"type"`
+		Credential util.StringSecret `yaml:"credentials"`
+	} `yaml:"authorization"`
 }
 
 // Create creates a new Cortex sink.
@@ -68,7 +87,16 @@ func Create(
 	// Host has to be supplied especially
 	tags["host"] = config.Hostname
 
-	return NewCortexMetricSink(conf.URL, conf.RemoteTimeout, conf.ProxyURL, logger, name, tags)
+	headers := make(map[string]string)
+	if conf.Authorization.Type != "" {
+		headers["Authorization"] = conf.Authorization.Type + " " + conf.Authorization.Credential.Value
+	}
+	var basicAuth *BasicAuthType
+	if conf.BasicAuth.Username.Value != "" {
+		basicAuth = &conf.BasicAuth
+	}
+
+	return NewCortexMetricSink(conf.URL, conf.RemoteTimeout, conf.ProxyURL, logger, name, tags, headers, basicAuth, conf.BatchWriteSize)
 }
 
 // ParseConfig extracts Cortex specific fields from the global veneur config
@@ -83,18 +111,32 @@ func ParseConfig(
 	if cortexConfig.RemoteTimeout == 0 {
 		cortexConfig.RemoteTimeout = DefaultRemoteTimeout
 	}
+	if cortexConfig.BasicAuth.Username.Value != "" {
+		if cortexConfig.BasicAuth.Password.Value == "" {
+			return nil, errors.New("cortex sink needs both username and password")
+		}
+		if cortexConfig.Authorization.Credential.Value != "" {
+			return nil, errors.New("cortex sink needs exactly one of basic_auth and authorization")
+		}
+	}
+	if cortexConfig.Authorization.Credential.Value != "" && cortexConfig.Authorization.Type == "" {
+		cortexConfig.Authorization.Type = DefaultAuthorizationType
+	}
 	return cortexConfig, nil
 }
 
 // NewCortexMetricSink creates and returns a new instance of the sink
-func NewCortexMetricSink(URL string, timeout time.Duration, proxyURL string, logger *logrus.Entry, name string, tags map[string]string) (*CortexMetricSink, error) {
+func NewCortexMetricSink(URL string, timeout time.Duration, proxyURL string, logger *logrus.Entry, name string, tags map[string]string, headers map[string]string, basicAuth *BasicAuthType, batchWriteSize int) (*CortexMetricSink, error) {
 	return &CortexMetricSink{
-		URL:           URL,
-		RemoteTimeout: timeout,
-		ProxyURL:      proxyURL,
-		tags:          tags,
-		logger:        logger.WithFields(logrus.Fields{"sink_type": "cortex"}),
-		name:          name,
+		URL:            URL,
+		RemoteTimeout:  timeout,
+		ProxyURL:       proxyURL,
+		tags:           tags,
+		logger:         logger.WithFields(logrus.Fields{"sink_type": "cortex"}),
+		name:           name,
+		addHeaders:     headers,
+		basicAuth:      basicAuth,
+		batchWriteSize: batchWriteSize,
 	}, nil
 }
 
@@ -121,8 +163,8 @@ func (s *CortexMetricSink) Start(tc *trace.Client) error {
 		t.Proxy = http.ProxyURL(p)
 	}
 
-	s.client = &http.Client{
-		Timeout:   time.Duration(s.RemoteTimeout * time.Second),
+	s.Client = &http.Client{
+		Timeout:   s.RemoteTimeout,
 		Transport: t,
 	}
 
@@ -132,6 +174,76 @@ func (s *CortexMetricSink) Start(tc *trace.Client) error {
 
 // Flush sends a batch of metrics to the configured remote-write endpoint
 func (s *CortexMetricSink) Flush(ctx context.Context, metrics []samplers.InterMetric) error {
+	span, _ := trace.StartSpanFromContext(ctx, "")
+	defer span.ClientFinish(s.traceClient)
+	metricKeyTags := map[string]string{"sink": s.name, "sink_type": "cortex"}
+	flushedMetrics := 0
+	droppedMetrics := 0
+	defer func() {
+		span.Add(ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(flushedMetrics), metricKeyTags))
+		span.Add(ssf.Count(sinks.MetricKeyTotalMetricsDropped, float32(droppedMetrics), metricKeyTags))
+	}()
+
+	if s.batchWriteSize == 0 || len(metrics) <= s.batchWriteSize {
+		err := s.writeMetrics(ctx, metrics)
+		if err == nil {
+			flushedMetrics = len(metrics)
+		} else {
+			droppedMetrics = len(metrics)
+		}
+
+		return err
+	}
+
+	doIfNotDone := func(fn func() error) error {
+		select {
+		case <-ctx.Done():
+			return errors.New("context finished before completing metrics flush")
+		default:
+			return fn()
+		}
+	}
+
+	var batch []samplers.InterMetric
+	for i, metric := range metrics {
+		err := doIfNotDone(func() error {
+			batch = append(batch, metric)
+			if i > 0 && i%s.batchWriteSize == 0 {
+				err := s.writeMetrics(ctx, batch)
+				if err != nil {
+					return err
+				}
+
+				flushedMetrics += len(batch)
+				batch = []samplers.InterMetric{}
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			droppedMetrics += len(batch)
+			return err
+		}
+	}
+
+	var err error
+	if len(batch) > 0 {
+		err = doIfNotDone(func() error {
+			return s.writeMetrics(ctx, batch)
+		})
+
+		if err == nil {
+			flushedMetrics += len(batch)
+		} else {
+			droppedMetrics += len(batch)
+		}
+	}
+
+	return err
+}
+
+func (s *CortexMetricSink) writeMetrics(ctx context.Context, metrics []samplers.InterMetric) error {
 	span, _ := trace.StartSpanFromContext(ctx, "")
 	defer span.ClientFinish(s.traceClient)
 
@@ -155,11 +267,21 @@ func (s *CortexMetricSink) Flush(ctx context.Context, metrics []samplers.InterMe
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("User-Agent", "veneur/cortex")
 	req.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+	for key, value := range s.addHeaders {
+		req.Header.Set(key, value)
+	}
+	if s.basicAuth != nil {
+		req.SetBasicAuth(s.basicAuth.Username.Value, s.basicAuth.Password.Value)
+	}
 
-	r, err := s.client.Do(req)
+	ts := time.Now()
+	r, err := s.Client.Do(req)
 	if err != nil {
 		span.Error(err)
-		s.logger.WithError(err).Info("Failed to post request")
+		s.logger.WithFields(logrus.Fields{
+			"error":        err,
+			"time_seconds": time.Since(ts).Seconds(),
+		}).Error("Failed to post request")
 		return err
 	}
 	// Resource leak can occur if body isn't closed explicitly
@@ -174,13 +296,6 @@ func (s *CortexMetricSink) Flush(ctx context.Context, metrics []samplers.InterMe
 		// Cortex responds with terse and informative messages
 		s.logger.Infof("Flush failed with HTTP %d: %s", r.StatusCode, b)
 	}
-
-	// Emit standard sink metrics
-	tags := map[string]string{"sink": s.name, "sink_type": "cortex"}
-	// We don't send sinks.MetricKeyTotalMetricsSkipped at present, as it would always be 0
-	span.Add(ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(len(metrics)), tags))
-
-	s.logger.Info("Flush complete")
 
 	return nil
 }
@@ -210,20 +325,32 @@ func makeWriteRequest(metrics []samplers.InterMetric, tags map[string]string) *p
 // legal set of characters (see https://prometheus.io/docs/practices/naming)
 // and we drop tags which are not in "key:value" format
 // (see https://prometheus.io/docs/concepts/data_model/)
+// we also take "last value wins" approach to duplicate labels inside a metric
 func metricToTimeSeries(metric samplers.InterMetric, tags map[string]string) *prompb.TimeSeries {
 	var ts prompb.TimeSeries
 	ts.Labels = []*prompb.Label{{
 		Name: "__name__", Value: sanitise(metric.Name),
 	}}
+
+	sanitisedTags := map[string]string{}
+
 	for _, tag := range metric.Tags {
 		kv := strings.SplitN(tag, ":", 2)
 		if len(kv) < 2 {
 			continue // drop illegal tag
 		}
-		ts.Labels = append(ts.Labels, &prompb.Label{Name: sanitise(kv[0]), Value: kv[1]})
+
+		sk := sanitise(kv[0])
+		sanitisedTags[sk] = kv[1]
 	}
+
 	for k, v := range tags {
-		ts.Labels = append(ts.Labels, &prompb.Label{Name: sanitise(k), Value: v})
+		sk := sanitise(k)
+		sanitisedTags[sk] = v
+	}
+
+	for k, v := range sanitisedTags {
+		ts.Labels = append(ts.Labels, &prompb.Label{Name: k, Value: v})
 	}
 
 	// Prom format has the ability to carry batched samples, in this instance we

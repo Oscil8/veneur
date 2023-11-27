@@ -25,8 +25,10 @@ features:
   enable_metric_sink_routing: false
   migrate_metric_sinks: false
   migrate_span_sinks: false
+  proxy_protocol: ""
 flush_file: ""
 flush_max_per_body: 0
+flush_on_shutdown: false
 flush_watchdog_missed_flushes: 0
 forward_address: ""
 forward_use_grpc: false
@@ -61,7 +63,7 @@ lightstep_access_token: ""
 lightstep_collector_host: ""
 lightstep_maximum_spans: 0
 lightstep_num_clients: 0
-lightstep_reconnect_period: ""
+lightstep_reconnect_period: 0s
 metric_max_length: 0
 metric_sink_routing: []
 metric_sinks: []
@@ -84,6 +86,13 @@ percentiles:
 - 0.99
 prometheus_network_type: ""
 prometheus_repeater_address: ""
+prometheus_remote_bearer_token: ""
+prometheus_remote_buffer_queue_size: 512
+prometheus_remote_flush_max_concurrency: 0
+prometheus_remote_flush_max_per_body: 0
+prometheus_remote_flush_interval: 1000
+prometheus_remote_flush_timeout: 35
+prometheus_remote_write_address: ""
 read_buffer_size_bytes: 2097152
 sentry_dsn: REDACTED
 signalfx_api_key: ""
@@ -97,6 +106,7 @@ signalfx_metric_name_prefix_drops: []
 signalfx_metric_tag_prefix_drops: []
 signalfx_per_tag_api_keys: []
 signalfx_vary_key_by: ""
+signalfx_vary_key_by_favor_common_dimensions: false
 sources: []
 span_channel_capacity: 0
 span_sinks: []
@@ -124,7 +134,7 @@ trace_lightstep_access_token: ""
 trace_lightstep_collector_host: ""
 trace_lightstep_maximum_spans: 0
 trace_lightstep_num_clients: 0
-trace_lightstep_reconnect_period: ""
+trace_lightstep_reconnect_period: 0s
 trace_max_length_bytes: 0
 veneur_metrics_additional_tags: []
 veneur_metrics_scopes:

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/stripe/veneur/v14/util"
+	"github.com/stripe/veneur/v14/util/matcher"
 )
 
 type Config struct {
@@ -31,12 +32,14 @@ type Config struct {
 	ExtendTags                   []string `yaml:"extend_tags"`
 	FalconerAddress              string   `yaml:"falconer_address"`
 	Features                     struct {
-		EnableMetricSinkRouting bool `yaml:"enable_metric_sink_routing"`
-		MigrateMetricSinks      bool `yaml:"migrate_metric_sinks"`
-		MigrateSpanSinks        bool `yaml:"migrate_span_sinks"`
+		EnableMetricSinkRouting bool   `yaml:"enable_metric_sink_routing"`
+		MigrateMetricSinks      bool   `yaml:"migrate_metric_sinks"`
+		MigrateSpanSinks        bool   `yaml:"migrate_span_sinks"`
+		ProxyProtocol           string `yaml:"proxy_protocol"`
 	} `yaml:"features"`
 	FlushFile                                 string              `yaml:"flush_file"`
 	FlushMaxPerBody                           int                 `yaml:"flush_max_per_body"`
+	FlushOnShutdown                           bool                `yaml:"flush_on_shutdown"`
 	FlushWatchdogMissedFlushes                int                 `yaml:"flush_watchdog_missed_flushes"`
 	ForwardAddress                            string              `yaml:"forward_address"`
 	ForwardUseGrpc                            bool                `yaml:"forward_use_grpc"`
@@ -67,10 +70,10 @@ type Config struct {
 	KafkaSpanSerializationFormat              string              `yaml:"kafka_span_serialization_format"`
 	KafkaSpanTopic                            string              `yaml:"kafka_span_topic"`
 	LightstepAccessToken                      util.StringSecret   `yaml:"lightstep_access_token"`
-	LightstepCollectorHost                    string              `yaml:"lightstep_collector_host"`
+	LightstepCollectorHost                    util.Url            `yaml:"lightstep_collector_host"`
 	LightstepMaximumSpans                     int                 `yaml:"lightstep_maximum_spans"`
 	LightstepNumClients                       int                 `yaml:"lightstep_num_clients"`
-	LightstepReconnectPeriod                  string              `yaml:"lightstep_reconnect_period"`
+	LightstepReconnectPeriod                  time.Duration       `yaml:"lightstep_reconnect_period"`
 	MetricMaxLength                           int                 `yaml:"metric_max_length"`
 	MetricSinkRouting                         []SinkRoutingConfig `yaml:"metric_sink_routing"`
 	MetricSinks                               []SinkConfig        `yaml:"metric_sinks"`
@@ -90,6 +93,13 @@ type Config struct {
 	Percentiles                               []float64           `yaml:"percentiles"`
 	PrometheusNetworkType                     string              `yaml:"prometheus_network_type"`
 	PrometheusRepeaterAddress                 string              `yaml:"prometheus_repeater_address"`
+	PrometheusRemoteBearerToken               string              `yaml:"prometheus_remote_bearer_token"`
+	PrometheusRemoteFlushMaxConcurrency       int                 `yaml:"prometheus_remote_flush_max_concurrency"`
+	PrometheusRemoteFlushMaxPerBody           int                 `yaml:"prometheus_remote_flush_max_per_body"`
+	PrometheusRemoteFlushInterval             int                 `yaml:"prometheus_remote_flush_interval"`
+	PrometheusRemoteFlushTimeout              int                 `yaml:"prometheus_remote_flush_timeout"`
+	PrometheusRemoteBufferQueueSize           int                 `yaml:"prometheus_remote_buffer_queue_size"`
+	PrometheusRemoteWriteAddress              string              `yaml:"prometheus_remote_write_address"`
 	ReadBufferSizeBytes                       int                 `yaml:"read_buffer_size_bytes"`
 	SentryDsn                                 util.StringSecret   `yaml:"sentry_dsn"`
 	SignalfxAPIKey                            util.StringSecret   `yaml:"signalfx_api_key"`
@@ -105,38 +115,39 @@ type Config struct {
 		APIKey util.StringSecret `yaml:"api_key"`
 		Name   string            `yaml:"name"`
 	} `yaml:"signalfx_per_tag_api_keys"`
-	SignalfxVaryKeyBy                 string            `yaml:"signalfx_vary_key_by"`
-	Sources                           []SourceConfig    `yaml:"sources"`
-	SpanChannelCapacity               int               `yaml:"span_channel_capacity"`
-	SpanSinks                         []SinkConfig      `yaml:"span_sinks"`
-	SplunkHecAddress                  string            `yaml:"splunk_hec_address"`
-	SplunkHecBatchSize                int               `yaml:"splunk_hec_batch_size"`
-	SplunkHecConnectionLifetimeJitter time.Duration     `yaml:"splunk_hec_connection_lifetime_jitter"`
-	SplunkHecIngestTimeout            time.Duration     `yaml:"splunk_hec_ingest_timeout"`
-	SplunkHecMaxConnectionLifetime    time.Duration     `yaml:"splunk_hec_max_connection_lifetime"`
-	SplunkHecSendTimeout              time.Duration     `yaml:"splunk_hec_send_timeout"`
-	SplunkHecSubmissionWorkers        int               `yaml:"splunk_hec_submission_workers"`
-	SplunkHecTLSValidateHostname      string            `yaml:"splunk_hec_tls_validate_hostname"`
-	SplunkHecToken                    string            `yaml:"splunk_hec_token"`
-	SplunkSpanSampleRate              int               `yaml:"splunk_span_sample_rate"`
-	SsfBufferSize                     int               `yaml:"ssf_buffer_size"`
-	SsfListenAddresses                []util.Url        `yaml:"ssf_listen_addresses"`
-	StatsAddress                      string            `yaml:"stats_address"`
-	StatsdListenAddresses             []util.Url        `yaml:"statsd_listen_addresses"`
-	SynchronizeWithInterval           bool              `yaml:"synchronize_with_interval"`
-	Tags                              []string          `yaml:"tags"`
-	TagsExclude                       []string          `yaml:"tags_exclude"`
-	TLSAuthorityCertificate           string            `yaml:"tls_authority_certificate"`
-	TLSCertificate                    string            `yaml:"tls_certificate"`
-	TLSKey                            util.StringSecret `yaml:"tls_key"`
-	TraceLightstepAccessToken         util.StringSecret `yaml:"trace_lightstep_access_token"`
-	TraceLightstepCollectorHost       string            `yaml:"trace_lightstep_collector_host"`
-	TraceLightstepMaximumSpans        int               `yaml:"trace_lightstep_maximum_spans"`
-	TraceLightstepNumClients          int               `yaml:"trace_lightstep_num_clients"`
-	TraceLightstepReconnectPeriod     string            `yaml:"trace_lightstep_reconnect_period"`
-	TraceMaxLengthBytes               int               `yaml:"trace_max_length_bytes"`
-	VeneurMetricsAdditionalTags       []string          `yaml:"veneur_metrics_additional_tags"`
-	VeneurMetricsScopes               struct {
+	SignalfxVaryKeyBy                      string            `yaml:"signalfx_vary_key_by"`
+	SignalfxVaryKeyByFavorCommonDimensions bool              `yaml:"signalfx_vary_key_by_favor_common_dimensions"`
+	Sources                                []SourceConfig    `yaml:"sources"`
+	SpanChannelCapacity                    int               `yaml:"span_channel_capacity"`
+	SpanSinks                              []SinkConfig      `yaml:"span_sinks"`
+	SplunkHecAddress                       string            `yaml:"splunk_hec_address"`
+	SplunkHecBatchSize                     int               `yaml:"splunk_hec_batch_size"`
+	SplunkHecConnectionLifetimeJitter      time.Duration     `yaml:"splunk_hec_connection_lifetime_jitter"`
+	SplunkHecIngestTimeout                 time.Duration     `yaml:"splunk_hec_ingest_timeout"`
+	SplunkHecMaxConnectionLifetime         time.Duration     `yaml:"splunk_hec_max_connection_lifetime"`
+	SplunkHecSendTimeout                   time.Duration     `yaml:"splunk_hec_send_timeout"`
+	SplunkHecSubmissionWorkers             int               `yaml:"splunk_hec_submission_workers"`
+	SplunkHecTLSValidateHostname           string            `yaml:"splunk_hec_tls_validate_hostname"`
+	SplunkHecToken                         string            `yaml:"splunk_hec_token"`
+	SplunkSpanSampleRate                   int               `yaml:"splunk_span_sample_rate"`
+	SsfBufferSize                          int               `yaml:"ssf_buffer_size"`
+	SsfListenAddresses                     []util.Url        `yaml:"ssf_listen_addresses"`
+	StatsAddress                           string            `yaml:"stats_address"`
+	StatsdListenAddresses                  []util.Url        `yaml:"statsd_listen_addresses"`
+	SynchronizeWithInterval                bool              `yaml:"synchronize_with_interval"`
+	Tags                                   []string          `yaml:"tags"`
+	TagsExclude                            []string          `yaml:"tags_exclude"`
+	TLSAuthorityCertificate                string            `yaml:"tls_authority_certificate"`
+	TLSCertificate                         string            `yaml:"tls_certificate"`
+	TLSKey                                 util.StringSecret `yaml:"tls_key"`
+	TraceLightstepAccessToken              util.StringSecret `yaml:"trace_lightstep_access_token"`
+	TraceLightstepCollectorHost            util.Url          `yaml:"trace_lightstep_collector_host"`
+	TraceLightstepMaximumSpans             int               `yaml:"trace_lightstep_maximum_spans"`
+	TraceLightstepNumClients               int               `yaml:"trace_lightstep_num_clients"`
+	TraceLightstepReconnectPeriod          time.Duration     `yaml:"trace_lightstep_reconnect_period"`
+	TraceMaxLengthBytes                    int               `yaml:"trace_max_length_bytes"`
+	VeneurMetricsAdditionalTags            []string          `yaml:"veneur_metrics_additional_tags"`
+	VeneurMetricsScopes                    struct {
 		Counter   string `yaml:"counter"`
 		Gauge     string `yaml:"gauge"`
 		Histogram string `yaml:"histogram"`
@@ -155,14 +166,26 @@ type HttpConfig struct {
 	Config bool `yaml:"config"`
 }
 
+type SinkRoutingConfig struct {
+	Name  string            `yaml:"name"`
+	Match []matcher.Matcher `yaml:"match"`
+	Sinks SinkRoutingSinks  `yaml:"sinks"`
+}
+
+type SinkRoutingSinks struct {
+	Matched    []string `yaml:"matched"`
+	NotMatched []string `yaml:"not_matched"`
+}
 type SourceConfig struct {
 	Kind   string      `yaml:"kind"`
 	Name   string      `yaml:"name"`
 	Config interface{} `yaml:"config"`
+	Tags   []string    `yaml:"tags"`
 }
 
 type SinkConfig struct {
-	Kind   string      `yaml:"kind"`
-	Name   string      `yaml:"name"`
-	Config interface{} `yaml:"config"`
+	Kind      string               `yaml:"kind"`
+	Name      string               `yaml:"name"`
+	Config    interface{}          `yaml:"config"`
+	StripTags []matcher.TagMatcher `yaml:"strip_tags"`
 }

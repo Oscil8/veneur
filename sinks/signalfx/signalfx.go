@@ -144,6 +144,7 @@ func (c *collection) submit(ctx context.Context, cl *trace.Client, maxPerFlush i
 
 type SignalFxSinkConfig struct {
 	APIKey                            util.StringSecret `yaml:"api_key"`
+	DropHostWithTagKey                string            `yaml:"drop_host_with_tag_key"`
 	DynamicPerTagAPIKeysEnable        bool              `yaml:"dynamic_per_tag_api_keys_enable"`
 	DynamicPerTagAPIKeysRefreshPeriod time.Duration     `yaml:"dynamic_per_tag_api_keys_refresh_period"`
 	EndpointAPI                       string            `yaml:"endpoint_api"`
@@ -156,31 +157,34 @@ type SignalFxSinkConfig struct {
 		APIKey util.StringSecret `yaml:"api_key"`
 		Name   string            `yaml:"name"`
 	} `yaml:"per_tag_api_keys"`
-	VaryKeyBy string `yaml:"vary_key_by"`
+	VaryKeyBy                      string `yaml:"vary_key_by"`
+	VaryKeyByFavorCommonDimensions bool   `yaml:"vary_key_by_favor_common_dimensions"`
 }
 
 // SignalFxSink is a MetricsSink implementation.
 type SignalFxSink struct {
-	apiEndpoint               string
-	clientsByTagValue         map[string]DPClient
-	clientsByTagValueMu       *sync.RWMutex
-	commonDimensions          map[string]string
-	defaultClient             DPClient
-	defaultToken              string
-	dynamicKeyRefreshPeriod   time.Duration
-	enableDynamicPerTagTokens bool
-	excludedTags              map[string]struct{}
-	hostname                  string
-	hostnameTag               string
-	httpClient                *http.Client
-	log                       *logrus.Entry
-	maxPointsInBatch          int
-	metricNamePrefixDrops     []string
-	metricsEndpoint           string
-	metricTagPrefixDrops      []string
-	name                      string
-	traceClient               *trace.Client
-	varyBy                    string
+	apiEndpoint                 string
+	clientsByTagValue           map[string]DPClient
+	clientsByTagValueMu         *sync.RWMutex
+	commonDimensions            map[string]string
+	defaultClient               DPClient
+	defaultToken                string
+	dropHostWithTagKey          string
+	dynamicKeyRefreshPeriod     time.Duration
+	enableDynamicPerTagTokens   bool
+	excludedTags                map[string]struct{}
+	hostname                    string
+	hostnameTag                 string
+	httpClient                  *http.Client
+	log                         *logrus.Entry
+	maxPointsInBatch            int
+	metricNamePrefixDrops       []string
+	metricsEndpoint             string
+	metricTagPrefixDrops        []string
+	name                        string
+	traceClient                 *trace.Client
+	varyBy                      string
+	varyByFavorCommonDimensions bool
 }
 
 // A DPClient is a client that can be used to submit signalfx data
@@ -215,11 +219,7 @@ func MigrateConfig(conf *veneur.Config) error {
 		conf.SignalfxDynamicPerTagAPIKeysRefreshPeriod == 0 {
 		conf.SignalfxDynamicPerTagAPIKeysRefreshPeriod = time.Duration(10 * time.Minute)
 	}
-	conf.MetricSinks = append(conf.MetricSinks, struct {
-		Kind   string      "yaml:\"kind\""
-		Name   string      "yaml:\"name\""
-		Config interface{} "yaml:\"config\""
-	}{
+	conf.MetricSinks = append(conf.MetricSinks, veneur.SinkConfig{
 		Kind: "signalfx",
 		Name: "signalfx",
 		Config: SignalFxSinkConfig{
@@ -234,6 +234,7 @@ func MigrateConfig(conf *veneur.Config) error {
 			MetricTagPrefixDrops:              conf.SignalfxMetricTagPrefixDrops,
 			PerTagAPIKeys:                     conf.SignalfxPerTagAPIKeys,
 			VaryKeyBy:                         conf.SignalfxVaryKeyBy,
+			VaryKeyByFavorCommonDimensions:    conf.SignalfxVaryKeyByFavorCommonDimensions,
 		},
 	})
 	return nil
@@ -321,24 +322,25 @@ func newSignalFxSink(
 	}
 
 	return &SignalFxSink{
-		apiEndpoint:               endpointStr,
-		clientsByTagValue:         perTagClients,
-		clientsByTagValueMu:       &sync.RWMutex{},
-		commonDimensions:          commonDimensions,
-		defaultClient:             client,
-		defaultToken:              config.APIKey.Value,
-		dynamicKeyRefreshPeriod:   config.DynamicPerTagAPIKeysRefreshPeriod,
-		enableDynamicPerTagTokens: config.DynamicPerTagAPIKeysEnable,
-		hostname:                  hostname,
-		hostnameTag:               config.HostnameTag,
-		httpClient:                httpClient,
-		log:                       log,
-		maxPointsInBatch:          config.FlushMaxPerBody,
-		metricNamePrefixDrops:     config.MetricNamePrefixDrops,
-		metricsEndpoint:           config.EndpointBase,
-		metricTagPrefixDrops:      config.MetricTagPrefixDrops,
-		name:                      name,
-		varyBy:                    config.VaryKeyBy,
+		apiEndpoint:                 endpointStr,
+		clientsByTagValue:           perTagClients,
+		clientsByTagValueMu:         &sync.RWMutex{},
+		commonDimensions:            commonDimensions,
+		defaultClient:               client,
+		defaultToken:                config.APIKey.Value,
+		dynamicKeyRefreshPeriod:     config.DynamicPerTagAPIKeysRefreshPeriod,
+		enableDynamicPerTagTokens:   config.DynamicPerTagAPIKeysEnable,
+		hostname:                    hostname,
+		hostnameTag:                 config.HostnameTag,
+		httpClient:                  httpClient,
+		log:                         log,
+		maxPointsInBatch:            config.FlushMaxPerBody,
+		metricNamePrefixDrops:       config.MetricNamePrefixDrops,
+		metricsEndpoint:             config.EndpointBase,
+		metricTagPrefixDrops:        config.MetricTagPrefixDrops,
+		name:                        name,
+		varyBy:                      config.VaryKeyBy,
+		varyByFavorCommonDimensions: config.VaryKeyByFavorCommonDimensions,
 	}, nil
 }
 
@@ -557,23 +559,25 @@ METRICLOOP: // Convenience label so that inner nested loops and `continue` easil
 
 		metricKey := ""
 
-		// Metric-specified API key, if present, should override the common dimension
+		// Datapoint-specified vary_key_by value, if present, should override the common dimension unless
+		// vary_key_by_favor_common_dimensions is set to true
 		metricOverrodeVaryBy := false
 		if sfx.varyBy != "" {
-			if _, ok := dims[sfx.varyBy]; ok {
+			if val, ok := dims[sfx.varyBy]; ok {
 				metricOverrodeVaryBy = true
+				metricKey = val
 			}
 		}
 
-		// Copy common dimensions, except for sfx.varyBy
+		// Copy applicable common dimensions
 		for k, v := range sfx.commonDimensions {
-			if metricOverrodeVaryBy && k == sfx.varyBy {
+			if metricOverrodeVaryBy && k == sfx.varyBy && !sfx.varyByFavorCommonDimensions {
 				continue
 			}
 			dims[k] = v
 		}
 
-		if sfx.varyBy != "" {
+		if sfx.varyBy != "" && metricKey == "" {
 			if val, ok := dims[sfx.varyBy]; ok {
 				metricKey = val
 			}
@@ -583,6 +587,13 @@ METRICLOOP: // Convenience label so that inner nested loops and `continue` easil
 			delete(dims, k)
 		}
 		delete(dims, "veneursinkonly")
+
+		if metric.Type == samplers.CounterMetric && sfx.dropHostWithTagKey != "" {
+			_, ok := dims[sfx.dropHostWithTagKey]
+			if ok {
+				delete(dims, sfx.hostnameTag)
+			}
+		}
 
 		var point *datapoint.Datapoint
 		switch metric.Type {
@@ -604,10 +615,7 @@ METRICLOOP: // Convenience label so that inner nested loops and `continue` easil
 		span.Error(err)
 	}
 	span.Add(ssf.Count(sinks.MetricKeyTotalMetricsFlushed, float32(numPoints), tags))
-	sfx.log.WithFields(logrus.Fields{
-		"metrics": len(interMetrics),
-		"success": err == nil,
-	}).Info("Completed flush to SignalFx")
+	sfx.log.WithField("metrics", len(interMetrics)).Info("flushed")
 
 	return err
 }

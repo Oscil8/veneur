@@ -56,11 +56,7 @@ func MigrateConfig(config *veneur.Config) {
 	if config.FlushFile == "" {
 		return
 	}
-	config.MetricSinks = append(config.MetricSinks, struct {
-		Kind   string      "yaml:\"kind\""
-		Name   string      "yaml:\"name\""
-		Config interface{} "yaml:\"config\""
-	}{
+	config.MetricSinks = append(config.MetricSinks, veneur.SinkConfig{
 		Kind: "localfile",
 		Name: "localfile",
 		Config: LocalFileSinkConfig{
@@ -141,7 +137,11 @@ func (sink *LocalFileSink) Flush(
 	}
 	csvWriter.Flush()
 	gzipWriter.Close()
-	return csvWriter.Error()
+	werr := csvWriter.Error()
+	if werr != nil {
+		return werr
+	}
+	return nil
 }
 
 // Name is the name of the LocalFilePlugin, i.e., "localfile"
